@@ -353,3 +353,68 @@ So a sliding window has to do two things on every call it intercepts:
   between 0 and 5.
 
 The game never receives an index it cannot write to.
+
+---
+
+## Inventory cursor and scrolling
+
+The inventory cursor is a single index from 0 to 5, held at `+0x2BC` in the
+menu object. The panel is two columns wide, so a vertical move is a step of
+two.
+
+Four movement paths, all reading and writing that one field:
+
+```asm
+; up, at 0x005E3BD1
+mov  eax, [edi+0x2BC]
+cmp  eax, 2
+jl   0x005E510E            ; already on the top row: refuse
+add  eax, -2
+mov  [edi+0x2BC], eax
+
+; down, at 0x005E3C99
+mov  eax, [edi+0x2BC]
+add  eax, 2
+cmp  eax, 6
+jge  0x005E510E            ; would leave the panel: refuse
+cmp  byte ptr [edi+0x2C6], 1
+mov  [edi+0x2BC], eax
+
+; left, at 0x005E3D5B
+mov  eax, [edi+0x2BC]
+mov  ecx, 5
+cmovs eax, ecx             ; ran off the start: wrap to the end
+
+; right, at 0x005E3E6D
+cmp  eax, 6
+cmovge eax, ecx            ; ran off the end: wrap to the start
+```
+
+Horizontal movement wraps within the six visible slots, which is already the
+behaviour a scrolling panel wants. Only the vertical moves refuse at the edge,
+and those are the two places where a window can scroll instead.
+
+### Where a scroll hook returns to
+
+Both refusals are a single conditional jump, six bytes, which is enough room for
+a five-byte jump and a pad byte. The replacement decides between three
+destinations rather than two:
+
+| Case | Destination | Why |
+|---|---|---|
+| Move is legal | the instruction after the jump | the game's own path, unchanged |
+| Refused, but the window can scroll | `0x005E3BE3` up, `0x005E3CAB` down | scroll instead, leave the cursor where it is, and rejoin the "cursor moved" path |
+| Refused, window at the end | `0x005E510E` | the game's own refusal |
+
+Rejoining at `0x005E3BE3` and `0x005E3CAB` matters: both are the instruction
+that stores the cursor. Entering there with the cursor unchanged rewrites the
+same value, which costs nothing and keeps whatever follows — the sound, the
+redraw — running exactly as the game wrote it.
+
+### Still unknown
+
+The menu object at `edi` holds the cursor, but nothing here says which
+character's bag the panel is showing. `+0x2C6` is read as a flag on the down
+path and is a candidate. Scrolling the wrong character's store would be worse
+than not scrolling at all, so this has to be answered before either hook is
+written.

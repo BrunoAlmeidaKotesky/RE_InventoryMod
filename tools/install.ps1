@@ -19,7 +19,7 @@ param(
     [switch]$DumpText,
     [ValidateSet('off', 'error', 'warn', 'info', 'debug', 'trace')]
     [string]$LogLevel = 'info',
-    [int]$Slots = 8
+    [int]$Slots = 12
 )
 
 $ErrorActionPreference = 'Stop'

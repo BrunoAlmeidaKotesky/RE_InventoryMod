@@ -9,6 +9,9 @@ use std::path::Path;
 use crate::core::logging::Level;
 use crate::game::inventory::BAG_SIZE;
 
+/// Slots per character when the ini says nothing. Double the stock six.
+pub const DEFAULT_SLOTS: usize = 12;
+
 /// Upper bound on slots. Exists to turn a typo into a warning instead of an
 /// absurd allocation.
 pub const MAX_SLOTS: usize = 32;
@@ -42,7 +45,7 @@ impl Default for Config {
             enabled: true,
             log_level: Level::Info,
             log_path: "re0inv.log".to_string(),
-            slots: 8,
+            slots: DEFAULT_SLOTS,
             debug: DebugConfig {
                 dump_text: false,
                 dump_path: "re0hd_text_dump.bin".to_string(),
