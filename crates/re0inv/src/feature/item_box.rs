@@ -143,9 +143,16 @@ pub fn force_open() {
 /// cursor never moves. Closing when the machine went out of reach closed it
 /// mid-use, because the prompt stops running once the screen is up.
 pub fn close_with_menu() {
-    if OPEN.swap(false, Ordering::Relaxed) {
-        log_info!("Inventory closed; the partner's bag is back.");
+    if !OPEN.swap(false, Ordering::Relaxed) {
+        return;
     }
+
+    // Safety: the screen has only just closed, so the object is still there.
+    // Leaving exchanging forced open would let the player hand items to a
+    // partner who is nowhere near.
+    unsafe { crate::hook::panel::restore_partner_half() };
+
+    log_info!("Inventory closed; the partner's bag is back.");
 }
 
 /// Sets the box up with room for `capacity` items.

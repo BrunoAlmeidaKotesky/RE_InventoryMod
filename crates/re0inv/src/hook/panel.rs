@@ -202,6 +202,92 @@ pub unsafe fn set_cursor(value: i32) -> bool {
     true
 }
 
+// --- Making the partner half usable as the box ---
+
+/// Set while the partner's half of the screen is on show.
+///
+/// Without it the game draws the player's inventory alone, which is what it
+/// does whenever the two characters are apart — and standing at a typewriter,
+/// they usually are.
+const OFFSET_PARTNER_SHOWN: usize = 0x2CA;
+
+/// Whether items may be moved between the two halves. Zero allows it.
+///
+/// The game sets this from how close the partner is. The box is not a partner
+/// and is never far away, so while it is showing this is forced open and the
+/// old value put back afterwards.
+const OFFSET_EXCHANGE: usize = 0x28B;
+
+const EXCHANGE_ALLOWED: u8 = 0;
+
+/// What the game had in the exchange field before the box took it over.
+static SAVED_EXCHANGE: Mutex<Option<u8>> = Mutex::new(None);
+
+/// Says once what the fields held before the box changed them.
+static FORCED: AtomicBool = AtomicBool::new(false);
+
+/// Puts the menu into the state the box needs, remembering what it replaced.
+///
+/// Called on every draw rather than once. The game writes both fields itself —
+/// on opening, and again whenever the played character changes — so a single
+/// write at the start would be undone by the game's own bookkeeping.
+///
+/// # Safety
+/// `menu` must be the object the panel was drawn against, which is alive for as
+/// long as the screen is.
+unsafe fn show_partner_half(menu: usize) {
+    let shown = (menu + OFFSET_PARTNER_SHOWN) as *mut u8;
+    let exchange = (menu + OFFSET_EXCHANGE) as *mut u8;
+
+    if !FORCED.swap(true, Ordering::Relaxed) {
+        log_info!(
+            "Box showing: partner half was {}, exchange was {}.",
+            shown.read_volatile(),
+            exchange.read_volatile()
+        );
+    }
+
+    if shown.read_volatile() == 0 {
+        shown.write_volatile(1);
+    }
+
+    let current = exchange.read_volatile();
+
+    if current == EXCHANGE_ALLOWED {
+        return;
+    }
+
+    if let Ok(mut saved) = SAVED_EXCHANGE.lock() {
+        // Only the first value seen is the game's own. Anything later is
+        // whatever it recomputed while the box was already showing.
+        saved.get_or_insert(current);
+    }
+
+    exchange.write_volatile(EXCHANGE_ALLOWED);
+}
+
+/// Puts the exchange field back to whatever the game had in it.
+///
+/// # Safety
+/// The menu object must still be alive, which is why this runs while the screen
+/// is closing rather than after.
+pub unsafe fn restore_partner_half() {
+    let Ok(mut saved) = SAVED_EXCHANGE.lock() else {
+        return;
+    };
+
+    FORCED.store(false, Ordering::Relaxed);
+
+    let Some(original) = saved.take() else {
+        return;
+    };
+
+    let Some(menu) = menu() else { return };
+
+    ((menu + OFFSET_EXCHANGE) as *mut u8).write_volatile(original);
+    log_debug!("Exchange state put back to {original}.");
+}
+
 /// The menu's state counter, for telling an open inventory from a closed one.
 pub fn phase() -> Option<i32> {
     let menu = menu()?;
@@ -265,6 +351,14 @@ extern "C" fn observe(menu: usize) {
     let _ = std::panic::catch_unwind(|| {
         if menu != 0 && menu.is_multiple_of(4) {
             MENU.store(menu, Ordering::Relaxed);
+
+            // The box lives in the partner's half, and that half is only drawn
+            // and only interactive when the game thinks a partner is there.
+            if crate::feature::item_box::is_open() {
+                // Safety: this is the object the game is drawing against right
+                // now, so it is alive and these are its own fields.
+                unsafe { show_partner_half(menu) };
+            }
         }
 
         let seen = DRAWS.fetch_add(1, Ordering::Relaxed);
