@@ -42,6 +42,37 @@ pub fn jump_bytes(from: usize, to: usize) -> Option<[u8; JUMP_LENGTH]> {
     ])
 }
 
+/// `call rel32`, which is a jump that leaves somewhere to come back to.
+const OP_CALL_REL32: u8 = 0xE8;
+
+/// Builds the bytes for a call from `from` to `to`.
+///
+/// Same arithmetic as a jump, different opcode. Used where the instruction
+/// being replaced has to hand control back — either because the code after it
+/// reads flags this sets, or because it was itself a call.
+pub fn call_bytes(from: usize, to: usize) -> [u8; JUMP_LENGTH] {
+    let next = (from as i64) + JUMP_LENGTH as i64;
+    let offset = ((to as i64) - next) as i32;
+    let offset = offset.to_le_bytes();
+
+    [OP_CALL_REL32, offset[0], offset[1], offset[2], offset[3]]
+}
+
+/// Where a `call rel32` at `at` goes, or `None` if that is not what is there.
+///
+/// Used before replacing a call, so the address it went to is read out of the
+/// game rather than assumed to match a table.
+pub fn call_target(at: usize) -> Option<usize> {
+    let bytes = crate::debug::memory::read_array::<JUMP_LENGTH>(at)?;
+
+    if bytes[0] != OP_CALL_REL32 {
+        return None;
+    }
+
+    let offset = i32::from_le_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]);
+    Some(((at as i64) + JUMP_LENGTH as i64 + i64::from(offset)) as usize)
+}
+
 /// `nop`, used to fill out an instruction longer than the jump.
 const OP_NOP: u8 = 0x90;
 

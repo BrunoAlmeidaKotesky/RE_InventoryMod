@@ -35,6 +35,9 @@ if (-not (Test-Path $GameDir)) { throw "Game directory not found: $GameDir" }
 $dll = Join-Path $repo 'target\i686-pc-windows-gnu\release\re0inv.dll'
 if (-not (Test-Path $dll)) { throw "Build the mod first: tools\build.ps1" }
 
+$cargo = Join-Path $env:USERPROFILE '.cargo\bin\cargo.exe'
+if (-not (Test-Path $cargo)) { $cargo = 'cargo' }
+
 $scripts = Join-Path $GameDir 'scripts'
 New-Item -ItemType Directory -Force -Path $scripts | Out-Null
 
@@ -91,6 +94,30 @@ if ($DisableOtherAsi) {
         Write-Host 'Other ASI plugins are present and will stay loaded:' -ForegroundColor Yellow
         $others | ForEach-Object { Write-Host "  $($_.Name)" -ForegroundColor Yellow }
         Write-Host 'They hook the same subsystem. Pass -DisableOtherAsi to rename them.' -ForegroundColor Yellow
+    }
+}
+
+# --- Message archives for the typewriter prompt ---
+
+# The box needs a third choice on the typewriter, and what a prompt offers comes
+# from the game's message files. re0msg reads the player's own archive, edits a
+# copy in memory and writes msg_<lang>_inv.arc next to it. The originals are
+# never touched, so verifying the game files reports nothing.
+if ($ItemBox) {
+    $messageDir = Join-Path $GameDir 'nativePC\arc\message'
+
+    if (-not (Test-Path $messageDir)) {
+        Write-Host "No message archives at $messageDir; the typewriter keeps its own prompt." -ForegroundColor Yellow
+    } else {
+        Write-Host 'Checking the message format before writing anything...' -ForegroundColor DarkGray
+        & $cargo run -q -p msgtool --release -- verify $messageDir
+        if ($LASTEXITCODE -ne 0) { throw 'Message archives did not rebuild unchanged; refusing to write.' }
+
+        & $cargo run -q -p msgtool --release -- build $messageDir
+        if ($LASTEXITCODE -ne 0) { throw 'Could not build the message archives.' }
+
+        Get-ChildItem $messageDir -Filter 'msg_*_inv.arc' |
+            ForEach-Object { $manifest.Created += $_.FullName }
     }
 }
 

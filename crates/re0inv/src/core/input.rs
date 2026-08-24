@@ -71,7 +71,7 @@ const SCROLL_STEP: i32 = 1;
 pub fn run(ini: PathBuf, debug_keys: bool) {
     log_info!("Inventory scrolling: press down on the bottom row, or click the right stick.");
     log_info!("Page Up and Page Down also scroll it directly.");
-    log_info!("Item box: Home, or click the left stick, while at a typewriter.");
+    log_info!("Item box: choose it on the typewriter prompt, or press Home in the inventory.");
     if debug_keys {
         log_info!("Debug keys: F7 selection scan, F8 remove hooks, F9 scan, F10 narrow, F11 inspect, F12 memory map.");
     }
@@ -86,6 +86,7 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
 
     let mut last_cursor: Option<i32> = None;
     let mut last_phase: Option<i32> = None;
+    let mut menu_was_open = false;
 
     loop {
         for (index, &key) in COMMAND_KEYS.iter().enumerate() {
@@ -127,7 +128,13 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
             last_phase = phase;
         }
 
-        crate::feature::item_box::close_if_out_of_reach();
+        // The box belongs to one visit to the inventory screen. Watching the
+        // screen close is what ends it.
+        let menu_open = panel::is_open();
+        if menu_was_open && !menu_open {
+            crate::feature::item_box::close_with_menu();
+        }
+        menu_was_open = menu_open;
 
         let down = holding_down(&controller, &mut pad_seen);
 

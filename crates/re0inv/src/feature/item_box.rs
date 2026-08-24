@@ -117,21 +117,35 @@ pub fn toggle() -> bool {
     open
 }
 
-/// Puts the partner's bag back once the player walks away from the typewriter.
+/// Shows the box because the player asked for it on the typewriter prompt.
 ///
-/// Not an idle timer. The first version closed the box when the selection had
-/// not moved for a while, which is exactly what happens at a typewriter: the
-/// cursor never moves there, so the box closed the instant it opened.
-///
-/// This asks the one question that actually matters — is the machine still
-/// within reach — and leaves the box alone otherwise.
-pub fn close_if_out_of_reach() {
-    if !is_open() || within_reach() {
+/// No reachability check: the request came from the typewriter itself, which is
+/// a better proof of standing at one than any timer.
+pub fn force_open() {
+    if !exists() {
+        log_warn!("The item box was chosen, but it is switched off in the configuration.");
         return;
     }
 
-    OPEN.store(false, Ordering::Relaxed);
-    log_info!("Left the typewriter; the partner's bag is back.");
+    if !OPEN.swap(true, Ordering::Relaxed) {
+        log_info!("Item box opened from the typewriter.");
+    }
+}
+
+/// Puts the partner's bag back when the inventory screen closes.
+///
+/// The box lives for exactly one visit to the screen, which is what the player
+/// sees: choose it at the typewriter, move things, back out, and the partner's
+/// bag is there again next time.
+///
+/// Two earlier rules were worse. Closing when the selection had not moved for a
+/// while closed the box the instant it opened, because at a typewriter the
+/// cursor never moves. Closing when the machine went out of reach closed it
+/// mid-use, because the prompt stops running once the screen is up.
+pub fn close_with_menu() {
+    if OPEN.swap(false, Ordering::Relaxed) {
+        log_info!("Inventory closed; the partner's bag is back.");
+    }
 }
 
 /// Sets the box up with room for `capacity` items.

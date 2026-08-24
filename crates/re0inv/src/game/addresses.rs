@@ -70,6 +70,38 @@ pub struct Addresses {
     /// The instruction after those three.
     pub typewriter_continue: usize,
 
+    // --- The typewriter prompt, all inside that routine ---
+
+    /// `mov [edi+0x10], 2.0f` at the end of the branch taken with an ink
+    /// ribbon. The field is the sub-state the next frame dispatches on, and
+    /// only `2.0f` reaches the code that reads which choice was made.
+    pub typewriter_has_ribbon: usize,
+    /// `mov [edi+0x10], 0.0f`, the same at the end of the branch without one.
+    /// This is why that prompt never asks anything: the sub-state it leaves
+    /// behind does not reach the choice.
+    pub typewriter_no_ribbon: usize,
+    /// `cmp dword ptr [esp+0x60], 1` - the choice the player made, where 1 is
+    /// the first option. Five bytes.
+    pub typewriter_choice: usize,
+    /// `call set_room_phase` on the path taken after answering yes, with the
+    /// phase already pushed. Five bytes.
+    pub typewriter_open_screen: usize,
+
+    /// `__thiscall(manager, phase)` - puts the game into a screen. Phase 5 is
+    /// the inventory and 6 is saving.
+    pub set_room_phase: usize,
+    /// `bool __thiscall(inventory)` - readies the inventory screen. Called
+    /// before the phase is set, and answers whether it may be opened at all.
+    pub prepare_inventory: usize,
+    /// Global holding the object `prepare_inventory` is called on.
+    pub inventory_holder: usize,
+
+    /// The three `push <format>` sites that build the path of a message
+    /// archive. The language name is already on the stack at each of them.
+    pub message_language: [usize; 3],
+    /// The format string those three push, which the trampolines push again.
+    pub message_format: usize,
+
     /// `__thiscall(transition)` - the per-frame update of the door transition.
     /// Three instructions, twelve bytes, before it touches anything.
     pub door_update: usize,
@@ -111,6 +143,18 @@ const JAN_2025: Addresses = Addresses {
 
     typewriter: 0x0057_A9D0,
     typewriter_continue: 0x0057_A9D5,
+
+    typewriter_has_ribbon: 0x0057_AD69,
+    typewriter_no_ribbon: 0x0057_ADA4,
+    typewriter_choice: 0x0057_ADF7,
+    typewriter_open_screen: 0x0057_AE36,
+
+    set_room_phase: 0x0061_0E00,
+    prepare_inventory: 0x005D_7550,
+    inventory_holder: 0x00DC_EBD0,
+
+    message_language: [0x0040_847E, 0x005D_67F1, 0x005D_6B61],
+    message_format: 0x00CB_5DDC,
 
     door_update: 0x0055_2300,
     door_update_continue: 0x0055_230C,
