@@ -64,13 +64,20 @@ foreach ($save in $saves) {
 # --- Other ASI plugins ---
 
 if ($DisableOtherAsi) {
+    # Moved out of the folder entirely, not renamed in place. The loader scans
+    # this directory, and leaving a disabled plugin sitting in it relies on the
+    # scan matching exactly what we assume. Somewhere else it cannot be found at
+    # all, whatever the loader does.
+    $parked = Join-Path $repo 'backups\install\disabled-asi'
+    New-Item -ItemType Directory -Force -Path $parked | Out-Null
+
     Get-ChildItem $scripts -Filter '*.asi' -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -ne 're0inv.asi' } |
         ForEach-Object {
-            $to = "$($_.FullName).disabled-by-re0inv"
+            $to = Join-Path $parked $_.Name
             Move-Item $_.FullName $to -Force
             $manifest.Renamed += @{ From = $_.FullName; To = $to }
-            Write-Host "Disabled: $($_.Name)" -ForegroundColor Yellow
+            Write-Host "Moved out of scripts: $($_.Name)" -ForegroundColor Yellow
         }
 } else {
     $others = Get-ChildItem $scripts -Filter '*.asi' -ErrorAction SilentlyContinue |

@@ -41,8 +41,8 @@ foreach ($path in $manifest.Created) {
     }
 }
 
-# Restore renamed plugins last, so a half-finished uninstall still leaves the
-# other mods working.
+# Put the other plugins back last, so a half-finished uninstall still leaves
+# them working.
 foreach ($entry in $manifest.Renamed) {
     if (Test-Path $entry.To) {
         Move-Item $entry.To $entry.From -Force
