@@ -100,6 +100,13 @@ fn take_request() -> bool {
 /// drawing path will want: it asks for the bags, which comes straight back
 /// through this mod.
 pub unsafe fn redraw_if_requested() {
+    // A screen that is not up has no panel to rebuild, and its object may
+    // already be freed — which is what a redraw against a stale pointer would
+    // find. Checked before the request is taken so it stays pending.
+    if !is_open() {
+        return;
+    }
+
     if !take_request() {
         return;
     }

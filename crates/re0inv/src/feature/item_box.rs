@@ -127,8 +127,26 @@ pub fn force_open() {
         return;
     }
 
+    // Always from the first slot. A window left wherever the last visit ended
+    // shows six empty slots of a box that is not empty, which reads as the box
+    // having lost everything in it.
+    rewind();
+
     if !OPEN.swap(true, Ordering::Relaxed) {
         log_info!("Item box opened from the typewriter.");
+    }
+}
+
+/// Puts the box's window back on its first slot.
+fn rewind() {
+    if let Ok(mut storage) = STORAGE.lock() {
+        if let Some(storage) = storage.as_mut() {
+            let mut bag = storage.read();
+            storage.window.read_from(&bag);
+            storage.window.reset();
+            storage.window.write_into(&mut bag);
+            storage.write(&bag);
+        }
     }
 }
 

@@ -58,12 +58,14 @@ pub fn set_continue(address: usize) {
 #[unsafe(naked)]
 pub unsafe extern "C" fn find_item_stub() {
     core::arch::naked_asm!(
-        // Arguments in reverse. Nothing has been pushed yet, so the id is still
-        // where the caller left it.
-        "push dword ptr [esp + 4]",
+        // Arguments in reverse: the return address, the id, then the bag.
+        // Nothing has been pushed yet, so the id is at [esp+4] and the return
+        // address at [esp]; each push shifts what follows.
+        "push dword ptr [esp]",
+        "push dword ptr [esp + 8]",
         "push ecx",
         "call {handler}",
-        "add esp, 8",
+        "add esp, 12",
         // __thiscall with one stack argument: the callee cleans it.
         "ret 4",
         handler = sym find_item,
@@ -102,7 +104,7 @@ unsafe extern "C" fn original(_bag: usize, _item_id: i32) -> i32 {
     )
 }
 
-extern "C" fn find_item(bag: usize, item_id: i32) -> i32 {
+extern "C" fn find_item(bag: usize, item_id: i32, called_from: usize) -> i32 {
     let result = std::panic::catch_unwind(|| {
         if bag == 0 || !bag.is_multiple_of(4) {
             return NOT_FOUND;
@@ -115,6 +117,17 @@ extern "C" fn find_item(bag: usize, item_id: i32) -> i32 {
         let found = ask();
         if found != NOT_FOUND {
             return found;
+        }
+
+        // Never sweep for the inventory screen. The screen asks about many
+        // items every frame, and a sweep leaves the window wherever the answer
+        // was found — which parked the box on its last six slots and made the
+        // player's panel crawl through the store while it was being looked at.
+        //
+        // Outside the screen nothing is drawn, so moving the window costs
+        // nothing and is the only way to answer honestly.
+        if crate::hook::accessor::is_menu_code(called_from) {
+            return NOT_FOUND;
         }
 
         sweep(bag as *mut Bag, item_id, ask)
@@ -143,9 +156,12 @@ fn sweep(bag: *mut Bag, item_id: i32, mut ask: impl FnMut() -> i32) -> i32 {
         log_debug!("Out-of-view searches: logged {LOG_LIMIT}, staying quiet from here.");
     }
 
-    // The window moved, so anything already on screen is now showing the wrong
-    // slots. Harmless outside the menu, where nothing is drawn.
-    crate::hook::panel::request_redraw();
+    // Only worth asking for when there is something on screen to correct. A
+    // standing request is honoured on the next accessor call, and after a save
+    // is loaded that call can land on a menu object the game has already freed.
+    if crate::hook::panel::is_open() {
+        crate::hook::panel::request_redraw();
+    }
 
     found
 }

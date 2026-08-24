@@ -307,7 +307,7 @@ fn played_id() -> Option<i32> {
 ///
 /// Including it is safe: it has exactly one caller, `0x005E43F3`, and that is
 /// the exchange handler inside the screen.
-fn is_menu_code(address: usize) -> bool {
+pub fn is_menu_code(address: usize) -> bool {
     const MENU_CODE: std::ops::Range<usize> = 0x005D_0000..0x005F_0000;
     const SWAP_HELPER: std::ops::Range<usize> = 0x004D_DFC0..0x004D_E0B8;
 
