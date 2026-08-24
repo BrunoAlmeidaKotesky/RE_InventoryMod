@@ -5,6 +5,13 @@
 // addresses that appear are the ones on the real path, and the ones that never
 // appear are the ones this project has been guessing at.
 //
+// Before anything else, stop the debugger pausing on its own. This game throws
+// C++ exceptions during normal play, and the defaults halt on every one of
+// them, which makes it unplayable. Both settings are remembered.
+//
+//   Options > Preferences > Events:     uncheck everything
+//   Options > Preferences > Exceptions: Add range 00000000 to FFFFFFFF
+//
 // How to use, with the game already running:
 //   1. File > Attach, pick re0hd.exe
 //   2. Press F9 once, so the game resumes
