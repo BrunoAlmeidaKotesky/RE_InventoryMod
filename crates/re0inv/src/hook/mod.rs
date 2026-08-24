@@ -133,6 +133,17 @@ pub unsafe fn install_all(addresses: &Addresses) -> Hooks {
         &CURSOR_READ,
     );
 
+    // `test [eax+0xB6C], esi`
+    const MODE_TEST: [u8; 6] = [0x85, 0xB0, 0x6C, 0x0B, 0x00, 0x00];
+
+    menu::set_mode_continue(addresses.menu_mode_test_continue);
+    hooks.detour(
+        "Menu::mode_test",
+        addresses.menu_mode_test,
+        menu::mode_test_stub as unsafe extern "C" fn() as usize,
+        &MODE_TEST,
+    );
+
     log_info!("{} hook(s) installed.", hooks.len());
     hooks
 }

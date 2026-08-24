@@ -27,6 +27,11 @@ pub struct Addresses {
     /// The same pair on the cursor-down path.
     pub cursor_read_down: usize,
     pub cursor_read_down_continue: usize,
+
+    /// `test [eax+0xB6C], esi`, the mode test that runs before the menu picks
+    /// which cursor path to take. Six bytes, and reached whichever mode wins.
+    pub menu_mode_test: usize,
+    pub menu_mode_test_continue: usize,
 }
 
 /// `MasterRelease Jan 28 2025 16:45:59`.
@@ -39,6 +44,9 @@ const JAN_2025: Addresses = Addresses {
 
     cursor_read_down: 0x005E_3C99,
     cursor_read_down_continue: 0x005E_3C9F,
+
+    menu_mode_test: 0x005E_3BB9,
+    menu_mode_test_continue: 0x005E_3BBF,
 };
 
 pub fn for_build(build: &Build) -> Option<Addresses> {

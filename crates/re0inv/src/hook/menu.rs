@@ -56,6 +56,11 @@ const LOG_LIMIT: usize = 12;
 
 static OBSERVATIONS: AtomicUsize = AtomicUsize::new(0);
 
+/// The mode observer only fires on change, so it can afford a longer budget
+/// than the per-keypress one.
+const MODE_LOG_LIMIT: usize = 60;
+static MODE_OBSERVATIONS: AtomicUsize = AtomicUsize::new(0);
+
 /// Where each trampoline hands control back, filled in at install time.
 ///
 /// The addresses are only known once the build is identified, so they cannot be
@@ -64,6 +69,10 @@ static OBSERVATIONS: AtomicUsize = AtomicUsize::new(0);
 /// game.
 static UP_CONTINUE: AtomicUsize = AtomicUsize::new(0);
 static DOWN_CONTINUE: AtomicUsize = AtomicUsize::new(0);
+static MODE_CONTINUE: AtomicUsize = AtomicUsize::new(0);
+
+/// Last reported state, so only changes are logged.
+static LAST_STATE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
 
 pub fn set_up_continue(address: usize) {
     UP_CONTINUE.store(address, Ordering::Relaxed);
@@ -71,6 +80,10 @@ pub fn set_up_continue(address: usize) {
 
 pub fn set_down_continue(address: usize) {
     DOWN_CONTINUE.store(address, Ordering::Relaxed);
+}
+
+pub fn set_mode_continue(address: usize) {
+    MODE_CONTINUE.store(address, Ordering::Relaxed);
 }
 
 /// Trampoline for the cursor read on the upward path.
@@ -126,6 +139,82 @@ pub unsafe extern "C" fn cursor_down_stub() {
         observe = sym observe,
         continue_at = sym DOWN_CONTINUE,
     )
+}
+
+/// Trampoline for the mode test that precedes the cursor paths.
+///
+/// The menu has more than one way of moving the cursor and picks between them
+/// on state. Patching one path only sees the sessions that happen to use it,
+/// which is how the first attempt logged nothing at all. This test runs before
+/// the choice is made, so it is reached whichever path wins.
+///
+/// # Safety
+/// Reached only through the patch written over `test [eax+0xB6C], esi`, so
+/// `edi` holds the menu object and `eax` the state being tested. The replaced
+/// instruction sets flags the next one reads, so it is re-executed here after
+/// the registers are back.
+#[unsafe(naked)]
+pub unsafe extern "C" fn mode_test_stub() {
+    core::arch::naked_asm!(
+        "pushfd",
+        "pushad",
+        "mov ebp, esp",
+        "and esp, -16",
+        "sub esp, 16",
+        // Arguments in reverse, as a C function expects them.
+        "mov [esp], edi",
+        "mov [esp + 4], eax",
+        "call {observe}",
+        "mov esp, ebp",
+        "popad",
+        "popfd",
+        // The instruction this replaced, recomputed so the flags are right.
+        "test dword ptr [eax + 0xB6C], esi",
+        "jmp dword ptr [{continue_at}]",
+        observe = sym observe_mode,
+        continue_at = sym MODE_CONTINUE,
+    )
+}
+
+/// Reports the menu state, but only when something changed.
+///
+/// This runs every frame the menu is open, so logging unconditionally would
+/// bury the interesting transitions under thousands of identical lines.
+extern "C" fn observe_mode(menu: usize, state: usize) {
+    let _ = std::panic::catch_unwind(|| {
+        if menu == 0 || !menu.is_multiple_of(4) {
+            return;
+        }
+
+        let cursor = unsafe { *((menu + OFFSET_CURSOR) as *const i32) };
+        let flag = unsafe { *((menu + OFFSET_FLAG) as *const u8) };
+
+        let mode_a = memory::read_i32(state + 0xB6C).unwrap_or(0);
+        let mode_b = memory::read_i32(state + 0xB70).unwrap_or(0);
+
+        // Pack what we care about so a change in any of it is one comparison.
+        let fingerprint = (cursor as u32 as u64)
+            | ((flag as u64) << 32)
+            | ((mode_a as u32 as u64) << 40)
+            | ((mode_b as u32 as u64) << 52);
+
+        if LAST_STATE.swap(fingerprint, Ordering::Relaxed) == fingerprint {
+            return;
+        }
+
+        let seen = MODE_OBSERVATIONS.fetch_add(1, Ordering::Relaxed);
+        if seen == MODE_LOG_LIMIT {
+            log_debug!("menu: logged {MODE_LOG_LIMIT} state changes, staying quiet from here.");
+        }
+        if seen >= MODE_LOG_LIMIT {
+            return;
+        }
+
+        log_info!(
+            "menu 0x{menu:08X}  cursor {cursor}  +0x2C6 {flag}  \
+             state 0x{state:08X}  +0xB6C 0x{mode_a:08X}  +0xB70 0x{mode_b:08X}"
+        );
+    });
 }
 
 /// Reports the menu object's state. Reads only.

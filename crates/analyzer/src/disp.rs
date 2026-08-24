@@ -16,7 +16,9 @@ use crate::disasm;
 use crate::image::Image;
 use crate::xref;
 
-const MAX_FUNCTION_SEARCH: u64 = 0x2000;
+/// The inventory menu function spans well over 0x2000 bytes, so a short search
+/// leaves most of its uses unattributed.
+const MAX_FUNCTION_SEARCH: u64 = 0x8000;
 
 /// Instructions decoded per linear pass. A range is decoded straight through,
 /// so it should start on a known instruction boundary, ideally a function start.
