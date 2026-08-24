@@ -53,10 +53,6 @@ impl Patch {
         Some(Patch { address, original })
     }
 
-    pub fn address(&self) -> usize {
-        self.address
-    }
-
     /// Puts the original bytes back.
     ///
     /// # Safety

@@ -1,7 +1,8 @@
 //! RE0 Inventory Expansion - ASI plugin for Resident Evil 0 HD Remaster.
 //!
-//! Phase 1: load, identify the game module, wait out the Steam DRM decryption,
-//! and optionally run the debug tooling. No hooks are installed yet.
+//! It loads, identifies the game module, waits out the Steam DRM decryption,
+//! then patches the functions whose addresses have been verified for that exact
+//! build. Anything unverified is left alone.
 
 #![cfg(windows)]
 
@@ -22,6 +23,7 @@ mod win32;
 
 use crate::core::config::Config;
 use crate::core::logging::{self, log_debug, log_error, log_info, log_warn};
+use crate::game::addresses;
 use crate::game::build::{self, Build};
 use crate::game::module::{self, Module};
 
@@ -115,7 +117,8 @@ fn startup() {
         }
     }
 
-    match Build::detect(&module) {
+    let detected = Build::detect(&module);
+    match &detected {
         Some(b) if b.is_supported() => log_info!("Game build: {}", b.stamp),
         Some(b) => {
             log_warn!("Game build: {}", b.stamp);
@@ -133,12 +136,33 @@ fn startup() {
         }
     }
 
-    log_info!("Initialization complete. No hooks installed in this phase.");
+    install_hooks(detected.as_ref());
+
+    log_info!("Initialization complete.");
 
     // Takes over this thread; nothing runs after it.
     if config.debug.probe {
         debug::probe::run(ini_path);
     }
+}
+
+/// Patches the game, but only for a build whose addresses were verified.
+///
+/// Writing a jump into whatever happens to sit at an address in some other
+/// build is how a mod corrupts a save. Doing nothing is always the safer
+/// failure.
+fn install_hooks(build: Option<&Build>) {
+    let Some(build) = build else {
+        log_warn!("Build unknown, so nothing will be patched.");
+        return;
+    };
+
+    let Some(addresses) = addresses::for_build(build) else {
+        log_warn!("No verified addresses for this build, so nothing will be patched.");
+        return;
+    };
+
+    unsafe { hook::install_and_keep(&addresses) };
 }
 
 fn log_module(module: &Module) {

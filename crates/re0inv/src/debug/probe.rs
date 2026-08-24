@@ -4,6 +4,7 @@
 //! can see in game (an item id, an ammo count), scan for it, change it in game,
 //! scan again for the new value, repeat until one address survives.
 //!
+//!   F8  remove every installed hook, restoring the game's own code
 //!   F9  scan for ProbeValue
 //!   F10 narrow the previous hits to the current ProbeValue
 //!   F11 dump the surviving hits, decoded as candidate Bags
@@ -23,6 +24,7 @@ use crate::core::logging::{log_info, log_warn};
 use crate::debug::memory;
 use crate::game::inventory::{Bag, BAG_BYTES};
 
+const VK_F8: i32 = 0x77;
 const VK_F9: i32 = 0x78;
 const VK_F10: i32 = 0x79;
 const VK_F11: i32 = 0x7A;
@@ -41,10 +43,12 @@ static HITS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 
 /// Polls the hotkeys forever. Runs on its own thread.
 pub fn run(ini: PathBuf) {
-    log_info!("Memory probe active. F9 scan, F10 narrow, F11 inspect, F12 memory map.");
+    log_info!(
+        "Memory probe active. F8 remove hooks, F9 scan, F10 narrow, F11 inspect, F12 memory map."
+    );
 
-    let keys = [VK_F9, VK_F10, VK_F11, VK_F12];
-    let mut was_down = [false; 4];
+    let keys = [VK_F8, VK_F9, VK_F10, VK_F11, VK_F12];
+    let mut was_down = [false; 5];
 
     loop {
         for (i, &key) in keys.iter().enumerate() {
@@ -63,6 +67,7 @@ pub fn run(ini: PathBuf) {
 
 fn dispatch(key: i32, ini: &Path) {
     match key {
+        VK_F8 => unsafe { crate::hook::remove_all_installed() },
         VK_F9 => scan(ini),
         VK_F10 => narrow(ini),
         VK_F11 => inspect(),

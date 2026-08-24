@@ -5,3 +5,9 @@
 # fills with errors that the real build never sees.
 [build]
 target = "i686-pc-windows-gnu"
+
+[target.i686-pc-windows-gnu]
+# The mingw C runtime calls DllMain by its stdcall-decorated name, `DllMain@12`,
+# while Rust exports it undecorated. The linker already bridges the two; this
+# only stops it warning about doing so on every build.
+rustflags = ["-C", "link-arg=-Wl,--enable-stdcall-fixup"]

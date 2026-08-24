@@ -75,10 +75,6 @@ impl Detour {
         self.name
     }
 
-    pub fn address(&self) -> usize {
-        self.patch.address()
-    }
-
     /// # Safety
     /// See `Patch::revert`.
     pub unsafe fn remove(&self) -> bool {
