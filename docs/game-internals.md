@@ -59,9 +59,9 @@ of `CC CC CC CC` runs while high-entropy ciphertext contains effectively none.
 
 ## Inventory data structures
 
-Sizes and offsets below are consistent with third-party reverse engineering of
-earlier builds and with the disassembly of this one. Field *contents* have not
-yet been confirmed against a live process.
+Offsets and sizes below are confirmed against this build's own code; see
+"Confirmed layout". What the fields hold at runtime has not been observed in a
+live process yet.
 
 ```
 Item            8 bytes
@@ -168,7 +168,7 @@ The sliding window is the chosen approach. Its cost is that game code which
 *scans* the bag — checking whether the player holds a key, finding ammunition
 to reload with, testing whether the inventory is full — only sees the six
 entries currently in view. Each such site needs a hook that consults the full
-store. Enumerating those sites is the next piece of work.
+store. Those sites are enumerated below.
 
 ---
 
