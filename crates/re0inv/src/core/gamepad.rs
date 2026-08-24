@@ -36,6 +36,10 @@ pub const BUTTON_DPAD_DOWN: u16 = 0x0002;
 /// is, as a way through the list that does not depend on reading the cursor.
 pub const BUTTON_RIGHT_THUMB: u16 = 0x0080;
 
+/// Clicking the left stick. Shows the item box, the pair to the key that does
+/// the same. Neither stick click is used by the game.
+pub const BUTTON_LEFT_THUMB: u16 = 0x0040;
+
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 struct Gamepad {

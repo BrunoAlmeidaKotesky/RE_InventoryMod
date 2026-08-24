@@ -21,7 +21,9 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::core::gamepad::{Controller, BUTTON_DPAD_DOWN, BUTTON_RIGHT_THUMB};
+use crate::core::gamepad::{
+    Controller, BUTTON_DPAD_DOWN, BUTTON_LEFT_THUMB, BUTTON_RIGHT_THUMB,
+};
 use crate::core::logging::{log_debug, log_info};
 use crate::debug::probe;
 use crate::game::inventory::BAG_SIZE;
@@ -72,8 +74,9 @@ const NAVIGATION_WINDOW: Duration = Duration::from_secs(5);
 const SCROLL_STEP: i32 = 1;
 
 pub fn run(ini: PathBuf, debug_keys: bool) {
-    log_info!("Inventory scrolling: press down on the bottom row; it wraps at the end.");
+    log_info!("Inventory scrolling: press down on the bottom row, or click the right stick.");
     log_info!("Page Up and Page Down also scroll it directly.");
+    log_info!("Item box: Home, or click the left stick, while at a typewriter.");
     if debug_keys {
         log_info!("Debug keys: F8 remove hooks, F9 scan, F10 narrow, F11 inspect, F12 memory map.");
     }
@@ -83,6 +86,7 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
     let mut command_was_down = [false; COMMAND_KEYS.len()];
     let mut down_was_down = false;
     let mut cycle_was_down = false;
+    let mut box_was_down = false;
     let mut pad_seen = false;
 
     let mut last_cursor: Option<i32> = None;
@@ -135,19 +139,24 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
 
         down_was_down = down;
 
+        let buttons = controller.as_ref().map_or(0, |pad| pad.buttons());
+
         // Clicking the right stick scrolls outright, wherever the selection is.
         // Reading the cursor to know when the player is pressing against the
         // bottom row is the nicer behaviour and it is kept, but it depends on
         // the cursor field and on our own reading of the pad. This does not.
-        let cycle = controller
-            .as_ref()
-            .is_some_and(|pad| pad.buttons() & BUTTON_RIGHT_THUMB != 0);
-
+        let cycle = buttons & BUTTON_RIGHT_THUMB != 0;
         if cycle && !cycle_was_down {
             scroll_or_wrap();
         }
-
         cycle_was_down = cycle;
+
+        // Clicking the left stick shows the box, the same as Home does.
+        let show_box = buttons & BUTTON_LEFT_THUMB != 0;
+        if show_box && !box_was_down {
+            toggle_box();
+        }
+        box_was_down = show_box;
 
         std::thread::sleep(POLL_INTERVAL);
     }
@@ -225,10 +234,7 @@ fn pressed(key: i32) -> bool {
 
 fn dispatch_command(key: i32, ini: &Path, debug_keys: bool) {
     match key {
-        VK_HOME => {
-            crate::feature::item_box::toggle();
-            panel::request_redraw();
-        }
+        VK_HOME => toggle_box(),
         VK_PAGE_UP => {
             if scroll_everything(-SCROLL_STEP) > 0 {
                 panel::request_redraw();
@@ -318,4 +324,14 @@ fn scroll_or_wrap() {
         panel::request_redraw();
         report();
     }
+}
+
+/// Shows the item box in place of the partner's bag, or puts it back.
+///
+/// The panel is asked to redraw either way: the icons are built when the
+/// inventory opens, so swapping what the panel is showing is exactly the case
+/// that needs one.
+fn toggle_box() {
+    crate::feature::item_box::toggle();
+    panel::request_redraw();
 }
