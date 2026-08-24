@@ -28,8 +28,12 @@ pub struct Addresses {
     pub cursor_read_down: usize,
     pub cursor_read_down_continue: usize,
 
-    /// `test [eax+0xB6C], esi`, the mode test that runs before the menu picks
-    /// which cursor path to take. Six bytes, and reached whichever mode wins.
+    /// `test [eax+0xB70], esi`, the first of the two state tests the menu makes
+    /// before choosing a cursor path. Six bytes.
+    ///
+    /// The second test, six bytes later, was tried first and never ran: the
+    /// branch between them is taken in ordinary play. This one is upstream of
+    /// that branch.
     pub menu_mode_test: usize,
     pub menu_mode_test_continue: usize,
 }
@@ -45,8 +49,8 @@ const JAN_2025: Addresses = Addresses {
     cursor_read_down: 0x005E_3C99,
     cursor_read_down_continue: 0x005E_3C9F,
 
-    menu_mode_test: 0x005E_3BB9,
-    menu_mode_test_continue: 0x005E_3BBF,
+    menu_mode_test: 0x005E_3BAD,
+    menu_mode_test_continue: 0x005E_3BB3,
 };
 
 pub fn for_build(build: &Build) -> Option<Addresses> {

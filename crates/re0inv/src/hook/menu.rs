@@ -169,7 +169,7 @@ pub unsafe extern "C" fn mode_test_stub() {
         "popad",
         "popfd",
         // The instruction this replaced, recomputed so the flags are right.
-        "test dword ptr [eax + 0xB6C], esi",
+        "test dword ptr [eax + 0xB70], esi",
         "jmp dword ptr [{continue_at}]",
         observe = sym observe_mode,
         continue_at = sym MODE_CONTINUE,

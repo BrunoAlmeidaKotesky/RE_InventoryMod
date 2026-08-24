@@ -1,0 +1,53 @@
+// Which menu code path does the game actually take?
+//
+// Every breakpoint here logs and keeps running, so the game stays playable.
+// Open the inventory, move the cursor around, then read the Log tab: the
+// addresses that appear are the ones on the real path, and the ones that never
+// appear are the ones this project has been guessing at.
+//
+// How to use, with the game already running:
+//   1. File > Attach, pick re0hd.exe
+//   2. Press F9 once, so the game resumes
+//   3. Plugins > Scripts, or the Script tab, then load this file and run it
+//   4. Play: open the inventory, move up and down in both panels
+//   5. Right-click the Log tab > Copy, and paste the result somewhere
+//
+// Attaching after the game has started is deliberate. The executable is wrapped
+// by Steam's DRM, which decrypts the real code at startup; before that happens
+// these addresses hold ciphertext and mean nothing.
+
+// The whole inventory menu function.
+bp 5E1D10
+bpcond 5E1D10, 0
+bplog 5E1D10, "menu-enter  ecx={ecx}"
+
+// First state test, upstream of everything else.
+bp 5E3BAD
+bpcond 5E3BAD, 0
+bplog 5E3BAD, "3BAD test-B70  eax={eax} edi={edi} cursor={d:[edi+2BC]} B70={x:[eax+B70]}"
+
+// Where that test jumps when it succeeds.
+bp 5E50F7
+bpcond 5E50F7, 0
+bplog 5E50F7, "50F7 taken-from-3BB3"
+
+// Second state test.
+bp 5E3BB9
+bpcond 5E3BB9, 0
+bplog 5E3BB9, "3BB9 test-B6C  eax={eax} B6C={x:[eax+B6C]}"
+
+// The other cursor mode.
+bp 5E3FC0
+bpcond 5E3FC0, 0
+bplog 5E3FC0, "3FC0 other-mode  edi={edi} cursor={d:[edi+2BC]}"
+
+// The cursor reads this project hooked first, on the up and down paths.
+bp 5E3BD1
+bpcond 5E3BD1, 0
+bplog 5E3BD1, "3BD1 cursor-up-read  cursor={d:[edi+2BC]}"
+
+bp 5E3C99
+bpcond 5E3C99, 0
+bplog 5E3C99, "3C99 cursor-down-read  cursor={d:[edi+2BC]}"
+
+log "re0 menu path breakpoints armed. Play, then read this log."
