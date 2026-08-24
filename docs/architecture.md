@@ -126,3 +126,58 @@ comes from [re0box](https://github.com/descawed/re0box) by descawed. Function
 addresses, struct layouts and observed behaviour were used as a reference and
 independently verified against this build's own disassembly. The implementation
 here is this project's own.
+
+---
+
+## How the window is actually delivered
+
+The sliding window above describes the idea. What makes it reach the screen is
+narrower than "keep the game's bag and swap its contents", and the difference
+cost a few wrong turns.
+
+Writing into the game's own bag does not work for anything the player can see.
+The panel is drawn from whatever a bag accessor returned, so memory the accessor
+did not point at is memory the drawing never reads.
+
+So the accessors are replaced instead. Each one answers with a sixty-four byte
+bag this mod owns, one per character, and the game reads, writes, scans and
+draws that. Its own bag is left alone.
+
+### Keeping the two in step
+
+The game writes into the view it was handed, at sites this mod does not
+intercept. Rather than trying to hook every write, each accessor call reads the
+view back into the store before refreshing it from the store. Whatever the game
+wrote at visible slot `k` is still at store index `position + k`, because the
+window only moves while the mod holds it.
+
+The game's own bag is also rewritten to match the view on every call. That is
+not for the game's benefit — it is what makes it possible to notice when
+something writes that bag directly, by comparing it against what was left there
+last time. Loading a save does exactly that, and without the check the store
+would overwrite a freshly loaded inventory with stale contents.
+
+### Aliasing
+
+The view is memory two parties write. It is never turned into a Rust reference,
+because a reference is a promise that nothing else touches it, and the compiler
+is entitled to act on that promise by keeping values in registers across the
+game's writes. Every access is a volatile read or write of the whole structure
+through a raw pointer.
+
+### What still has to follow the window
+
+`equipped_index` is a slot number between 0 and 5, meaningful only against what
+the window is showing. Scrolling the contents underneath it without translating
+leaves the game holding a number that now points at something else, and applying
+the equipped item then reads whatever landed there. The window tracks the
+equipped item by store index and rewrites the field on every sync, reporting
+"nothing equipped" while it is out of view.
+
+### Redrawing
+
+The panel is built when the inventory opens. Item descriptions come off the bag
+live, so they follow a scroll on their own; icons do not. Scrolling therefore
+marks the panel as out of date, and the redraw is triggered from inside a bag
+accessor — which runs on the game's own thread, mid-frame. Doing it from the
+mod's thread would mean drawing while the game is drawing.

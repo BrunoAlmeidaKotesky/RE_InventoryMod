@@ -449,3 +449,121 @@ recognises: 1, 2, 3, 5 or 7.
 Resolving this matters because a scroll hook has to know which store to move.
 Scrolling the wrong character's store would show the player the other
 character's inventory shifting on its own.
+
+---
+
+## How the game reaches a bag
+
+Nothing in the game holds a bag pointer for long. It asks for one whenever it
+needs one, through a small family of accessors, and uses the answer immediately.
+That is what makes a larger inventory possible at all: replace the accessors and
+the game works on storage this mod owns, without a single byte of its own layout
+changing.
+
+| Address | Signature | How it picks the character |
+|---|---|---|
+| `0x004DC8B0` | `Bag* __thiscall(owner, id)` | given as an argument |
+| `0x004DC8E0` | `Bag* __thiscall(owner)` | the played character |
+| `0x004DCA00` | `Bag* __thiscall(owner)` | the partner |
+| `0x0050DC70` | `Bag* __thiscall(owner, id)` | wrapper; unwraps a `tsl::optional` and calls `0x004DC8B0` |
+
+All four end the same way, and this is the whole of their logic:
+
+```asm
+cmp  eax, 1 / 2 / 3   ->  lea eax, [owner+0x20]
+cmp  eax, 5 / 7       ->  lea eax, [owner+0x60]
+otherwise             ->  xor eax, eax
+```
+
+`0x004DC8B0` is the one that matters most: thirty call sites reach it directly,
+and `0x0050DC70` funnels dozens more into it. A mod that hooks only the two
+argument-less accessors leaves all of those seeing the game's own bag — which is
+exactly what happened here, and why items handed out at the start of a game
+bypassed this mod entirely.
+
+The two that take no argument ask the game who the character is:
+
+| Address | Returns |
+|---|---|
+| `0x00DCBF3C` | global holding the object that knows the characters |
+| `0x004EC780` | `__thiscall(holder)` - the played character |
+| `0x0096CD30` | `__thiscall(holder)` - the partner |
+| `0x00522AF0` | `__thiscall(character)` - that character's id |
+
+All four are `__thiscall` taking nothing but `this`, and all four end in a plain
+`ret`, which matters to anything calling them from outside.
+
+---
+
+## How the panel is drawn
+
+```asm
+0x005E7240  draw_panels(menu)
+              call 0x004DC8E0        ; the played character's bag
+              push edi               ; and hand it straight on
+              call 0x005E6D40        ; draw one panel
+              ...                    ; then the same for the partner
+
+0x005E6D40  draw_panel(menu, bag, ...)
+              mov  ecx, [esp+8]      ; the bag
+              test ecx, ecx
+              je   done              ; a null bag draws nothing at all
+              ...
+              call 0x004DC290        ; Bag::item_at, per slot
+
+0x004DC290  Bag::item_at(index)
+              cmp  esi, 6            ; bounds check
+              lea  eax, [esi*8+4]    ; items[index]
+```
+
+Two consequences.
+
+A null bag makes the panel draw nothing, which means the partner panel is a
+generic surface rather than something tied to a partner existing.
+
+And the panel is built when the inventory opens, not redrawn every frame. The
+item *description* under the panel does come off the bag live and updates on its
+own; the item *icons* do not. Changing what a bag holds while the inventory is
+open therefore shows in the text and not in the pictures until it is closed and
+reopened, unless the drawing is asked to run again.
+
+### Related
+
+`0x004DC820` is the game's own "how many slots does this item take" function,
+with a jump table at `0x004DC864`. It is a better source for that than any
+hand-copied list of two-slot item ids.
+
+---
+
+## The menu object
+
+| Offset | Meaning | How it was established |
+|---|---|---|
+| `+0x294` | state counter | `inc [edi+0x294]` at `0x005E1EF6` and `0x005E1EC4` |
+| `+0x2BC` | cursor, 0 to 5 | read and written by every cursor path |
+| `+0x2C6` | byte compared against 1 | on the downward cursor path |
+| `+0x2CA` | written 0 and 1 near the character switch | candidate for which panel is active |
+
+The cursor is one index over the six slots. Vertical movement steps by two
+because the panel is two columns wide; horizontal steps by one, so odd values
+occur.
+
+Pressing up on the top row already moves to the tabs above the panel. That gesture
+is taken, and a mod that claims it breaks something the player uses.
+
+---
+
+## Save file layout
+
+The vanilla file is 2337008 bytes. The shape below is derived from the save code
+in this build, not from any other mod:
+
+| Part | Size |
+|---|---|
+| header | `0xC8` = 200 bytes |
+| 20 slots | 20 x `0x1C850` = 2336520 bytes |
+| tail | 488 bytes |
+
+`0x1C850` is the per-slot stride, and the slot count comes from a `cmp esi, 0x13`
+bound. The arithmetic closes exactly, which is good evidence but not the same as
+having parsed the file.
