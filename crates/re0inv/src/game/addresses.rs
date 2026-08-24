@@ -54,6 +54,12 @@ pub struct Addresses {
     /// The re-arm that puts a second back when the room change is not done.
     pub door_duration_rearm: usize,
 
+    /// `__thiscall(transition)` - the per-frame update of the door transition.
+    /// Three instructions, twelve bytes, before it touches anything.
+    pub door_update: usize,
+    /// The instruction after those three.
+    pub door_update_continue: usize,
+
     /// The four fade durations, each the immediate of a `mov [esp], imm32`.
     pub door_fade_screen_out: usize,
     pub door_fade_audio_out: usize,
@@ -83,6 +89,9 @@ const JAN_2025: Addresses = Addresses {
     door_duration_tail: 0x0055_2A21,
     door_duration_modelless: 0x0055_2A46,
     door_duration_rearm: 0x0055_255C,
+
+    door_update: 0x0055_2300,
+    door_update_continue: 0x0055_230C,
 
     door_fade_screen_out: 0x0055_236D,
     door_fade_audio_out: 0x0055_2380,

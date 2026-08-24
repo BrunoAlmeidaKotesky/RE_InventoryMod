@@ -21,7 +21,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::core::gamepad::{Controller, BUTTON_DPAD_DOWN};
+use crate::core::gamepad::{Controller, BUTTON_DPAD_DOWN, BUTTON_RIGHT_THUMB};
 use crate::core::logging::{log_debug, log_info};
 use crate::debug::probe;
 use crate::game::inventory::BAG_SIZE;
@@ -82,6 +82,7 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
 
     let mut command_was_down = [false; COMMAND_KEYS.len()];
     let mut down_was_down = false;
+    let mut cycle_was_down = false;
     let mut pad_seen = false;
 
     let mut last_cursor: Option<i32> = None;
@@ -133,6 +134,20 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
         }
 
         down_was_down = down;
+
+        // Clicking the right stick scrolls outright, wherever the selection is.
+        // Reading the cursor to know when the player is pressing against the
+        // bottom row is the nicer behaviour and it is kept, but it depends on
+        // the cursor field and on our own reading of the pad. This does not.
+        let cycle = controller
+            .as_ref()
+            .is_some_and(|pad| pad.buttons() & BUTTON_RIGHT_THUMB != 0);
+
+        if cycle && !cycle_was_down {
+            scroll_or_wrap();
+        }
+
+        cycle_was_down = cycle;
 
         std::thread::sleep(POLL_INTERVAL);
     }
@@ -284,4 +299,23 @@ fn scroll_everything(rows: i32) -> usize {
     }
 
     moved
+}
+
+/// Scrolls down a row, starting over from the top at the end of the list.
+///
+/// Shared by the right stick click and by pressing against the bottom row: both
+/// mean "show me the next rows", and both need somewhere to go once there are
+/// no next rows left.
+fn scroll_or_wrap() {
+    if scroll_everything(SCROLL_STEP) > 0 {
+        panel::request_redraw();
+        report();
+        return;
+    }
+
+    if registry::rewind_all() > 0 || crate::feature::item_box::scroll(i32::MIN / 2) {
+        log_info!("Wrapped back to the first slot.");
+        panel::request_redraw();
+        report();
+    }
 }

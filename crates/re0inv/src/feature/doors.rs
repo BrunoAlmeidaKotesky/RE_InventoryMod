@@ -77,6 +77,31 @@ impl Doors {
     pub unsafe fn install(addresses: &Addresses, shorten_fades: bool) -> Doors {
         let mut patches = Vec::new();
 
+        // Watching comes first and changes nothing. The transition is still
+        // about as long as it was, and only a timeline of the states says
+        // whether what is left is padding or the room change itself.
+        const UPDATE_PROLOGUE: [u8; 12] = [
+            0x83, 0xEC, 0x74, // sub esp, 0x74
+            0x57, // push edi
+            0xC7, 0x44, 0x24, 0x04, 0x00, 0x00, 0x00, 0x00, // mov [esp+4], 0
+        ];
+
+        set_watch_continue(addresses.door_update_continue);
+
+        if let Some(jump) = crate::hook::detour::jump_bytes(
+            addresses.door_update,
+            watch_stub as unsafe extern "C" fn() as usize,
+        ) {
+            let mut bytes = [NOP; UPDATE_PROLOGUE.len()];
+            bytes[..jump.len()].copy_from_slice(&jump);
+
+            push(
+                &mut patches,
+                "door state watcher",
+                Patch::write_expecting(addresses.door_update, &UPDATE_PROLOGUE, &bytes),
+            );
+        }
+
         apply_timer(addresses, &mut patches);
 
         if shorten_fades {
@@ -199,4 +224,107 @@ fn push(patches: &mut Vec<Patch>, what: &str, patch: Option<Patch>) {
         Some(patch) => patches.push(patch),
         None => log_warn!("Door skip: could not patch the {what}."),
     }
+}
+
+// --- Watching where the time actually goes ---
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
+use std::time::Instant;
+
+/// State field inside the transition object.
+const OFFSET_STATE: usize = 0x44;
+/// The animation timer, in seconds.
+const OFFSET_TIMER: usize = 0x2C;
+/// Set once the room change reports finished. State four waits on this.
+const OFFSET_HANDSHAKE: usize = 0x28;
+
+/// Transitions logged before going quiet. A door is six states, so this is a
+/// handful of doorways.
+const TIMELINE_LIMIT: usize = 60;
+
+static TIMELINE: Mutex<Option<(i32, Instant)>> = Mutex::new(None);
+static LOGGED: AtomicUsize = AtomicUsize::new(0);
+static WATCH_CONTINUE: AtomicUsize = AtomicUsize::new(0);
+
+pub fn set_watch_continue(address: usize) {
+    WATCH_CONTINUE.store(address, Ordering::Relaxed);
+}
+
+/// Trampoline over the start of the transition's per-frame update.
+///
+/// Reports how long each state lasts. That is the only way to answer whether
+/// the remaining wait is padding this feature can remove, or the room change
+/// itself, which it must not touch.
+///
+/// # Safety
+/// Reached only through the detour written over the first three instructions,
+/// so `ecx` holds the transition object. Those instructions are re-executed
+/// here before control returns.
+#[unsafe(naked)]
+pub unsafe extern "C" fn watch_stub() {
+    core::arch::naked_asm!(
+        "pushfd",
+        "pushad",
+        "mov ebp, esp",
+        "and esp, -16",
+        "sub esp, 16",
+        "mov [esp], ecx",
+        "call {observe}",
+        "mov esp, ebp",
+        "popad",
+        "popfd",
+        // The three instructions this replaced.
+        "sub esp, 0x74",
+        "push edi",
+        "mov dword ptr [esp + 4], 0",
+        "jmp dword ptr [{continue_at}]",
+        observe = sym observe_state,
+        continue_at = sym WATCH_CONTINUE,
+    )
+}
+
+extern "C" fn observe_state(transition: usize) {
+    let _ = std::panic::catch_unwind(|| {
+        if transition == 0 || !transition.is_multiple_of(4) {
+            return;
+        }
+
+        let Some(state) = crate::debug::memory::read_i32(transition + OFFSET_STATE) else {
+            return;
+        };
+
+        let Ok(mut previous) = TIMELINE.lock() else {
+            return;
+        };
+
+        let changed = match *previous {
+            Some((last, _)) => last != state,
+            None => true,
+        };
+
+        if !changed {
+            return;
+        }
+
+        let elapsed = previous.map(|(_, at)| at.elapsed());
+        *previous = Some((state, Instant::now()));
+
+        if LOGGED.fetch_add(1, Ordering::Relaxed) >= TIMELINE_LIMIT {
+            return;
+        }
+
+        let timer = crate::debug::memory::read_i32(transition + OFFSET_TIMER);
+        let handshake = crate::debug::memory::read_i32(transition + OFFSET_HANDSHAKE);
+
+        match elapsed {
+            Some(spent) => log_info!(
+                "Door state -> {state} after {} ms; timer bits {:?}, handshake {:?}",
+                spent.as_millis(),
+                timer,
+                handshake.map(|h| h & 0xFF)
+            ),
+            None => log_info!("Door state -> {state} (first seen)."),
+        }
+    });
 }

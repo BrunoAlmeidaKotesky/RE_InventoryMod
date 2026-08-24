@@ -32,6 +32,10 @@ const MAX_PADS: u32 = 4;
 /// the tabs above the panel when the top row is pressed against.
 pub const BUTTON_DPAD_DOWN: u16 = 0x0002;
 
+/// Clicking the right stick. Scrolls a row regardless of where the selection
+/// is, as a way through the list that does not depend on reading the cursor.
+pub const BUTTON_RIGHT_THUMB: u16 = 0x0080;
+
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 struct Gamepad {
