@@ -25,6 +25,8 @@
 
 use std::collections::BTreeMap;
 
+use iced_x86::{Mnemonic, Register};
+
 use crate::image::Image;
 use crate::xref;
 
@@ -95,6 +97,75 @@ pub fn find(image: &Image, capacity: u8, assert_string: u64) -> Vec<Site> {
     out
 }
 
+/// Instructions decoded forward from a bound check when deciding whether it
+/// sits inside a loop.
+const LOOP_WINDOW: usize = 64;
+
+/// How the index reaching a bound check is produced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Access {
+    /// The index register is advanced and control branches back: the code walks
+    /// the array. Under a sliding window this only ever sees the visible slots.
+    Iterates,
+    /// The index is not advanced near the check: one slot, chosen elsewhere.
+    /// A sliding window does not change what this reads.
+    SingleSlot,
+}
+
+/// Decides whether a bound check guards a loop.
+///
+/// Looks for the two halves of an iteration around the check: the index
+/// register being advanced, and a branch going backwards to at or before the
+/// check. Requiring both keeps a plain `if (index < 6)` out of the results.
+fn access_at(image: &Image, check: u64) -> Access {
+    let lines = crate::disasm::decode(image, check, LOOP_WINDOW);
+
+    let Some(first) = lines.first() else {
+        return Access::SingleSlot;
+    };
+
+    let index = first.instruction.op0_register();
+    if index == Register::None {
+        return Access::SingleSlot;
+    }
+
+    let mut advances_index = false;
+    let mut branches_backward = false;
+
+    for line in lines.iter().skip(1) {
+        let instruction = &line.instruction;
+
+        // `inc reg` or `add reg, imm`, on the register that was bound-checked.
+        let advances = matches!(instruction.mnemonic(), Mnemonic::Inc | Mnemonic::Add)
+            && instruction.op0_register() == index;
+
+        if advances {
+            advances_index = true;
+        }
+
+        let target = instruction.near_branch_target();
+        if target != 0 && target <= check && target >= image.base {
+            branches_backward = true;
+        }
+
+        // A second check on the same register means a new loop; stop here so
+        // the two are not conflated.
+        if line.va != check
+            && instruction.mnemonic() == Mnemonic::Cmp
+            && instruction.op0_register() == index
+            && branches_backward
+        {
+            break;
+        }
+    }
+
+    if advances_index && branches_backward {
+        Access::Iterates
+    } else {
+        Access::SingleSlot
+    }
+}
+
 pub fn report(image: &Image, capacity: u8, assert_string: u64) {
     let sites = find(image, capacity, assert_string);
 
@@ -115,14 +186,50 @@ pub fn report(image: &Image, capacity: u8, assert_string: u64) {
         by_function.len()
     );
     println!();
+    println!(
+        "{:<12} {:>7} {:>10} {:>7}  {}",
+        "function", "checks", "iterating", "single", "iterating check sites"
+    );
+    println!("{}", "-".repeat(92));
+
+    let mut iterating_functions = 0;
+    let mut iterating_sites = 0;
 
     for (function, hits) in &by_function {
-        let addresses: Vec<String> = hits.iter().map(|s| format!("0x{:08X}", s.check)).collect();
+        let mut iterating = Vec::new();
+        let mut single = 0;
+
+        for site in hits {
+            match access_at(image, site.check) {
+                Access::Iterates => iterating.push(site.check),
+                Access::SingleSlot => single += 1,
+            }
+        }
+
+        if !iterating.is_empty() {
+            iterating_functions += 1;
+            iterating_sites += iterating.len();
+        }
+
+        let listed: Vec<String> = iterating
+            .iter()
+            .take(4)
+            .map(|va| format!("0x{:08X}", va))
+            .collect();
+        let suffix = if iterating.len() > 4 {
+            format!(" +{}", iterating.len() - 4)
+        } else {
+            String::new()
+        };
+
         println!(
-            "0x{:08X}  {:>2} check(s)  {}",
+            "0x{:08X}  {:>7} {:>10} {:>7}  {}{}",
             function,
             hits.len(),
-            addresses.join(" ")
+            iterating.len(),
+            single,
+            listed.join(" "),
+            suffix
         );
     }
 
@@ -132,6 +239,12 @@ pub fn report(image: &Image, capacity: u8, assert_string: u64) {
     }
 
     println!();
-    println!("Not all of these touch a bag: any six-element tsl::array lands here.");
-    println!("Each function still has to be read before it is called a bag site.");
+    println!("{iterating_sites} of {} checks iterate, across {iterating_functions} functions.", sites.len());
+    println!();
+    println!("A single-slot access keeps working under a sliding window; the slot it");
+    println!("reads is whichever one the window is showing. An iterating access does");
+    println!("not: it walks only the visible slots and misses the rest of the store.");
+    println!();
+    println!("Not all of these touch a bag. Any six-element tsl::array lands here, so");
+    println!("each iterating function still has to be read before it is called a bag site.");
 }

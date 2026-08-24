@@ -260,3 +260,60 @@ both inside the inventory module. Those are the first to read in detail.
 This count is an upper bound on the work, not a list of required hooks. A site
 that reads one known slot keeps working unchanged under a sliding window; only
 sites that walk the array need to consult the full store.
+
+---
+
+## The `Bag` method family
+
+The functions that walk the item array are not scattered through the codebase.
+They form a small family of `__thiscall` methods taking `Bag*` in `ecx`, all
+living in the inventory module, and all shaped the same way:
+
+```asm
+lea  edi, [ecx+4]            ; items[0]
+xor  esi, esi                ; index
+.loop:
+cmp  esi, 6                  ; capacity, guarding the inlined array assert
+jb   .in_range
+  push <tsl/array.h strings>
+  call assert
+.in_range:
+...                          ; read items[index]
+inc  esi
+add  edi, 8
+cmp  esi, 6
+jb   .loop
+```
+
+| Address | Observed signature | Behaviour |
+|---|---|---|
+| `0x004DB440` | `(Bag*)` | index of the first empty slot, or `-1` |
+| `0x004DB480` | `(Bag*)` | number of empty slots |
+| `0x004DBD60` | `(Bag*, int)` | search by item id |
+| `0x004DC300` | `(Bag*, int)` | search by item id, variant |
+| `0x004DC370` | `(Bag*, int)` | search by item id, variant |
+| `0x004DC070` | `(Bag*, int)` | find a combination partner; consults a table at `0x00CC69E0` indexed as `arg * 15 + item` |
+| `0x004DB1D0` | `(Bag*)` | reads the equipped index at `+0x3C`, then walks |
+| `0x004DB6B0` | `(Bag*)` | same, two loops |
+| `0x004DA9D0` | `(…, out*)` | initialises three output indices to `-1`, six loops |
+
+Two more sit outside the module and reach a bag through an accessor:
+`0x0057F5A0` (does the player hold item 3 or 4) and `0x005AF2C0`.
+
+### Where the slot count is encoded
+
+The capacity is not stored anywhere. It is an immediate operand, repeated at
+every access, because `tsl::array`'s bounds assert is inlined at each use.
+
+Counting the checks against six, by region:
+
+| Region | Checks | Iterating |
+|---|---|---|
+| inventory module, `0x004DA9A0` - `0x004DDFC0` | 84 | 16 |
+| inventory UI, `0x005D97A0` - `0x005E7370` | 23 | 2 |
+| `0x0061A630`, `0x0061B8E0` | 38 | 2 |
+| elsewhere | 21 | 7 |
+
+Sites that read one slot keep working whatever the backing store is: they read
+whichever slot the game can currently see. Sites that iterate do not — they walk
+six entries and never learn about the rest.
