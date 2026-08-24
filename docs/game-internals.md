@@ -152,23 +152,9 @@ Global worth investigating: `0x00DCBF44`.
 
 ## Design consequence
 
-Two approaches were considered for enlarging the inventory:
-
-**Grow the struct in place.** Allocate a larger bag and have the accessor
-return it. Rejected: the two bags are adjacent inline fields, so a larger array
-at `+0x20` overruns the bag at `+0x60`, and `+0x60` is encoded as a literal in
-the instruction stream. Every offset in the parent object would have to be
-rewritten, along with any code that assumes a 64-byte bag.
-
-**Sliding window.** Keep the game's 64-byte bag exactly as it is and treat it
-as a view onto a larger backing store owned by the mod, scrolling the view as
-the player moves through the inventory. The game's memory layout is untouched.
-
-The sliding window is the chosen approach. Its cost is that game code which
-*scans* the bag — checking whether the player holds a key, finding ammunition
-to reload with, testing whether the inventory is full — only sees the six
-entries currently in view. Each such site needs a hook that consults the full
-store. Those sites are enumerated below.
+The two bags being adjacent inline fields rules out growing either one in place.
+The options that remain, and the reasoning that picked between them, are in
+[architecture.md](architecture.md).
 
 ---
 

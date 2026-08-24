@@ -10,7 +10,9 @@ use std::process::ExitCode;
 mod bounds;
 mod classify;
 mod disasm;
+mod disp;
 mod image;
+mod pattern;
 mod xref;
 
 use image::Image;
@@ -36,6 +38,9 @@ COMMANDS:
     classify <VA>         score every function calling VA for bag scanning
     bounds [N]            find sites indexing an N-element array (default 6)
     datarefs <VA>         find VA appearing as a literal 4-byte value
+    disp <HEX> <LOW> <HIGH>  memory operands using this field displacement
+    pattern <BYTES> [LOW HIGH]
+                          byte search, ?? is a wildcard, optional VA range
     context <VA> [COUNT]  disassemble around VA, marking it
 
 Addresses are hexadecimal, with or without a 0x prefix.
@@ -135,6 +140,23 @@ fn run(args: &[String]) -> Result<(), String> {
             for r in &refs {
                 println!("0x{:08X}", r.from);
             }
+        }
+
+        "disp" => {
+            let value = operand_address(operands, 0, "disp needs a displacement")? as u32;
+            let low = operand_address(operands, 1, "disp needs a low address")?;
+            let high = operand_address(operands, 2, "disp needs a high address")?;
+            disp::report(&image, value, low, high);
+        }
+
+        "pattern" => {
+            let raw = operands.first().ok_or("pattern needs bytes")?;
+            let needle = pattern::parse(raw)?;
+            let range = match (operands.get(1), operands.get(2)) {
+                (Some(low), Some(high)) => Some((parse_address(low)?, parse_address(high)?)),
+                _ => None,
+            };
+            pattern::report(&image, &needle, range);
         }
 
         "context" => {
