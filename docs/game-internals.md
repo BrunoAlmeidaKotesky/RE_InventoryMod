@@ -303,3 +303,53 @@ Counting the checks against six, by region:
 Sites that read one slot keep working whatever the backing store is: they read
 whichever slot the game can currently see. Sites that iterate do not — they walk
 six entries and never learn about the rest.
+
+---
+
+## Confirmed in a running process
+
+The layout above was read out of the disassembly. Hooking the two smallest bag
+methods and logging what the game passed them confirms it against a live game.
+
+`Bag::first_empty` observed during a new game, as the starting items are handed
+out:
+
+```
+first_empty(0x2D895010) = 0  [0 0 0 0 0 0]
+first_empty(0x2D895010) = 1  [4 0 0 0 0 0]
+first_empty(0x2D895050) = 0  [0 0 0 0 0 0]
+first_empty(0x2D895050) = 1  [3 0 0 0 0 0]
+first_empty(0x2D895050) = 2  [3 2 0 0 0 0]
+```
+
+Two things follow.
+
+The returned index tracks the slots filling up one at a time, so the array is
+where the disassembly said it is, with the stride it said.
+
+The two bag addresses are `0x2D895010` and `0x2D895050`, exactly `0x40` apart.
+The parent object is therefore at `0x2D894FF0`, with its bags at `+0x20` and
+`+0x60` — the same offsets the accessor produces with
+`lea eax, [ecx+0x20]` and `lea eax, [ecx+0x60]`. Both characters' bags really
+are adjacent inline fields of one object, in a running game and not only on
+paper.
+
+### What that means for the window
+
+The index these methods return is used by the caller as a write target: the
+game stores the incoming item at `bag->items[index]`.
+
+A store larger than the bag therefore cannot simply answer with a store index.
+Returning 6 or 7 — valid in the store, absent from the bag — makes the game
+write past the array and over the personal item that follows it. That is silent
+memory corruption, not a visible bug.
+
+So a sliding window has to do two things on every call it intercepts:
+
+- Read the bag's six slots back into the store before deciding anything, so the
+  two cannot drift apart.
+- Move the window, if nothing visible is free but the store has room, until a
+  free slot is visible, rewrite the bag, and only then answer with an index
+  between 0 and 5.
+
+The game never receives an index it cannot write to.
