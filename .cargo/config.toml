@@ -1,0 +1,7 @@
+# Default every cargo invocation to the 32-bit target.
+#
+# Without this, `cargo check` and rust-analyzer evaluate the crate for the
+# 64-bit host, where the 32-bit assertion in src/win32.rs fails and the editor
+# fills with errors that the real build never sees.
+[build]
+target = "i686-pc-windows-gnu"

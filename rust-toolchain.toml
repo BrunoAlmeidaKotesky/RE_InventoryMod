@@ -1,0 +1,8 @@
+# The game is a 32-bit process, so the mod must be built 32-bit.
+#
+# The gnu toolchain is used because the msvc target needs the Windows SDK,
+# which is not required here. Pinning it in the repo means plain `cargo build`
+# works, and rust-analyzer picks the same toolchain the build uses.
+[toolchain]
+channel = "stable-i686-pc-windows-gnu"
+targets = ["i686-pc-windows-gnu"]

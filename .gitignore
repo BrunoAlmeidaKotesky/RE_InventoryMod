@@ -22,5 +22,9 @@ Cargo.lock
 # ---- Logs e temporarios ----
 *.log
 *.tmp
-.vscode/
 .idea/
+
+# ---- Notas internas de desenvolvimento ----
+# Ficam fora do repositorio publico: contem caminhos da maquina local,
+# raciocinio em andamento e os documentos de aprendizado em portugues.
+dev-notes/

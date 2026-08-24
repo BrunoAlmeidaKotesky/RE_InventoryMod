@@ -33,8 +33,15 @@ const DECRYPT_TIMEOUT: Duration = Duration::from_secs(60);
 ///
 /// Runs while the loader lock is held, so it does nothing but spawn a thread.
 /// Any I/O or waiting here risks deadlocking process startup.
+///
+/// # Safety
+/// Called by the Windows loader with a valid module handle.
 #[no_mangle]
-pub extern "system" fn DllMain(instance: *mut c_void, reason: u32, _reserved: *mut c_void) -> i32 {
+pub unsafe extern "system" fn DllMain(
+    instance: *mut c_void,
+    reason: u32,
+    _reserved: *mut c_void,
+) -> i32 {
     if reason == DLL_PROCESS_ATTACH {
         unsafe {
             // The game spawns many threads and we care about none of them.

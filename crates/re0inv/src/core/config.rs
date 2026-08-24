@@ -112,7 +112,7 @@ impl Config {
             self.slots = BAG_SIZE;
         }
 
-        if self.slots % 2 != 0 {
+        if !self.slots.is_multiple_of(2) {
             let fixed = self.slots + 1;
             warnings.push(format!(
                 "Slots={} is odd and would break two-slot items; using {}.",
