@@ -143,7 +143,7 @@ fn startup() {
 
     // Takes over this thread; nothing runs after it. It always runs, because
     // scrolling the inventory is read from the keyboard here.
-    debug::probe::run(ini_path, config.debug.probe);
+    core::input::run(ini_path, config.debug.probe);
 }
 
 /// Patches the game, but only for a build whose addresses were verified.

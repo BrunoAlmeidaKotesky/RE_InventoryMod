@@ -82,6 +82,14 @@ extern "system" {
 
     pub fn GetModuleHandleA(module_name: *const u8) -> Handle;
 
+    /// Loads a DLL by name. Used for XInput, whose file name varies by Windows
+    /// version, so linking against it directly would make the mod fail to load
+    /// on machines that ship a different one.
+    pub fn LoadLibraryA(file_name: *const u8) -> Handle;
+
+    /// Resolves an exported symbol. Returns None when the export is absent.
+    pub fn GetProcAddress(module: Handle, name: *const u8) -> Option<unsafe extern "system" fn()>;
+
     pub fn GetModuleFileNameA(module: Handle, filename: *mut u8, size: u32) -> u32;
 
     pub fn DisableThreadLibraryCalls(module: Handle) -> Bool;

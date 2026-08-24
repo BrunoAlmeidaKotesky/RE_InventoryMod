@@ -12,10 +12,20 @@
 use crate::game::inventory::{Bag, Item, BAG_SIZE};
 use crate::store::slots::Slots;
 
+/// What the game stores in the equipped index when nothing is equipped.
+const NOTHING_EQUIPPED: i32 = -1;
+
 pub struct Window {
     store: Slots,
     /// First store index the game can see. Always even.
     position: usize,
+    /// Store index of the equipped item, if anything is equipped.
+    ///
+    /// The game keeps this as a slot number between 0 and 5, which only means
+    /// anything relative to what the window is showing. Scrolling the contents
+    /// underneath it without translating leaves the game holding a slot number
+    /// that now points at a different item, or at nothing.
+    equipped: Option<usize>,
 }
 
 impl Window {
@@ -23,7 +33,13 @@ impl Window {
         Window {
             store: Slots::new(capacity),
             position: 0,
+            equipped: None,
         }
+    }
+
+    /// Store index of the equipped item.
+    pub fn equipped(&self) -> Option<usize> {
+        self.equipped
     }
 
     pub fn store(&self) -> &Slots {
@@ -87,19 +103,46 @@ impl Window {
 
     /// Copies the visible slots into the bag the game reads.
     ///
-    /// Only the item slots are touched. The personal item and the equipped
-    /// index belong to the bag itself, not to the store, and overwriting them
-    /// here would discard state the game owns.
+    /// The personal item is left alone: it is a slot of its own, outside the
+    /// array, and has nothing to do with the window.
+    ///
+    /// The equipped index is rewritten, because it is a slot number and the
+    /// slots have just changed underneath it. When the equipped item is out of
+    /// view the game is told nothing is equipped, which is the only honest
+    /// answer available in six slots.
     pub fn write_into(&self, bag: &mut Bag) {
         let visible = self.store.view(self.position, BAG_SIZE);
         for (slot, item) in bag.items.iter_mut().zip(visible) {
             *slot = item;
         }
+
+        bag.equipped_index = self
+            .equipped
+            .and_then(|index| self.visible_slot(index))
+            .map_or(NOTHING_EQUIPPED, |slot| slot as i32);
     }
 
     /// Copies whatever the game left in the bag back into the store.
     pub fn read_from(&mut self, bag: &Bag) {
         self.store.write_back(self.position, &bag.items);
+
+        let slot = bag.equipped_index;
+
+        if (0..BAG_SIZE as i32).contains(&slot) {
+            self.equipped = Some(self.position + slot as usize);
+            return;
+        }
+
+        // The game says nothing is equipped. Believe it only when what we think
+        // is equipped is in view: otherwise this is our own `write_into` being
+        // read back, and clearing here would unequip the item for good.
+        let equipped_is_visible = self
+            .equipped
+            .is_some_and(|index| self.visible_slot(index).is_some());
+
+        if equipped_is_visible {
+            self.equipped = None;
+        }
     }
 
     /// First visible slot that is empty, if any.
@@ -270,16 +313,70 @@ mod tests {
     }
 
     #[test]
-    fn the_personal_item_and_equipped_index_are_left_alone() {
+    fn the_personal_item_is_left_alone() {
         let window = filled_window(12);
         let mut bag = empty_bag();
         bag.personal_item = item(SHOTGUN);
-        bag.equipped_index = 3;
 
         window.write_into(&mut bag);
 
         assert_eq!(bag.personal_item, item(SHOTGUN));
-        assert_eq!(bag.equipped_index, 3);
+    }
+
+    #[test]
+    fn the_equipped_item_follows_the_window() {
+        let mut window = filled_window(12);
+        let mut bag = empty_bag();
+
+        // The game equips what is in visible slot 2, which is store index 2.
+        bag.equipped_index = 2;
+        window.read_from(&bag);
+        assert_eq!(window.equipped(), Some(2));
+
+        // Scrolling one row leaves it in view, one slot earlier.
+        window.scroll_rows(1);
+        window.write_into(&mut bag);
+        assert_eq!(bag.equipped_index, 0);
+
+        // Scrolling past it reports nothing equipped, without forgetting it.
+        window.scroll_rows(1);
+        window.write_into(&mut bag);
+        assert_eq!(bag.equipped_index, -1);
+        assert_eq!(window.equipped(), Some(2));
+
+        // Coming back brings it into view again.
+        window.scroll_rows(-2);
+        window.write_into(&mut bag);
+        assert_eq!(bag.equipped_index, 2);
+    }
+
+    #[test]
+    fn an_out_of_view_equipped_item_survives_a_read_back() {
+        let mut window = filled_window(12);
+        let mut bag = empty_bag();
+
+        bag.equipped_index = 0;
+        window.read_from(&bag);
+        window.scroll_rows(2);
+        window.write_into(&mut bag);
+
+        // This is our own -1 coming back, not the game unequipping.
+        window.read_from(&bag);
+        assert_eq!(window.equipped(), Some(0));
+    }
+
+    #[test]
+    fn the_game_unequipping_in_view_is_believed() {
+        let mut window = filled_window(12);
+        let mut bag = empty_bag();
+
+        bag.equipped_index = 1;
+        window.read_from(&bag);
+        assert_eq!(window.equipped(), Some(1));
+
+        bag.equipped_index = -1;
+        window.read_from(&bag);
+        assert_eq!(window.equipped(), None);
     }
 
     #[test]

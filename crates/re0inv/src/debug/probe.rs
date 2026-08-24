@@ -1,41 +1,20 @@
-//! Hotkey-driven memory probe.
+//! Memory probe.
 //!
 //! The workflow it supports is the standard narrowing search: note a value you
 //! can see in game (an item id, an ammo count), scan for it, change it in game,
 //! scan again for the new value, repeat until one address survives.
 //!
-//!   F8  remove every installed hook, restoring the game's own code
-//!   F9  scan for ProbeValue
-//!   F10 narrow the previous hits to the current ProbeValue
-//!   F11 dump the surviving hits, decoded as candidate Bags
-//!   F12 log the memory region map
-//!
-//! ProbeValue is re-read from the ini on every press, so it can be changed
-//! while the game runs.
+//! The keys that drive it are bound in `core::input`; these are the commands
+//! behind them. `ProbeValue` is re-read from the ini on every call, so it can be
+//! changed while the game runs.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Mutex;
-use std::time::Duration;
-
-use crate::win32::{GetAsyncKeyState, KEY_PRESSED};
 
 use crate::core::config::Config;
 use crate::core::logging::{log_info, log_warn};
 use crate::debug::memory;
-use crate::game::inventory::{Bag, BAG_BYTES, BAG_SIZE};
-use crate::store::registry;
-
-/// Page Up and Page Down scroll the inventory window.
-const VK_PAGE_UP: i32 = 0x21;
-const VK_PAGE_DOWN: i32 = 0x22;
-
-const VK_F8: i32 = 0x77;
-const VK_F9: i32 = 0x78;
-const VK_F10: i32 = 0x79;
-const VK_F11: i32 = 0x7A;
-const VK_F12: i32 = 0x7B;
-
-const POLL_INTERVAL: Duration = Duration::from_millis(60);
+use crate::game::inventory::{Bag, BAG_BYTES};
 
 /// Cap so a scan for a common value cannot exhaust memory.
 const MAX_HITS: usize = 200_000;
@@ -46,60 +25,12 @@ const MAX_INSPECTED: usize = 8;
 
 static HITS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 
-/// Polls the hotkeys forever. Runs on its own thread.
-pub fn run(ini: PathBuf, debug_keys: bool) {
-    log_info!("Page Up and Page Down scroll the inventory.");
-    if debug_keys {
-        log_info!("Debug keys: F8 remove hooks, F9 scan, F10 narrow, F11 inspect, F12 memory map.");
-    }
-
-    let keys = [
-        VK_PAGE_UP,
-        VK_PAGE_DOWN,
-        VK_F8,
-        VK_F9,
-        VK_F10,
-        VK_F11,
-        VK_F12,
-    ];
-    let mut was_down = [false; 7];
-
-    loop {
-        for (i, &key) in keys.iter().enumerate() {
-            let down = unsafe { GetAsyncKeyState(key) } as u16 & KEY_PRESSED != 0;
-
-            // Edge trigger: act once per press, not once per poll.
-            if down && !was_down[i] {
-                dispatch(key, &ini, debug_keys);
-            }
-            was_down[i] = down;
-        }
-
-        std::thread::sleep(POLL_INTERVAL);
-    }
-}
-
-fn dispatch(key: i32, ini: &Path, debug_keys: bool) {
-    // Scrolling is a feature, not a diagnostic, so it works regardless of
-    // whether the debug keys are switched on.
-    match key {
-        VK_PAGE_UP => scroll(-1),
-        VK_PAGE_DOWN => scroll(1),
-        _ if !debug_keys => {}
-        VK_F8 => unsafe { crate::hook::remove_all_installed() },
-        VK_F9 => scan(ini),
-        VK_F10 => narrow(ini),
-        VK_F11 => inspect(),
-        VK_F12 => log_regions(),
-        _ => {}
-    }
-}
 
 fn probe_value(ini: &Path) -> i32 {
     Config::load(ini).debug.probe_value
 }
 
-fn scan(ini: &Path) {
+pub fn scan(ini: &Path) {
     let value = probe_value(ini);
     log_info!("Scanning for {} (0x{:08X})...", value, value);
 
@@ -108,7 +39,7 @@ fn scan(ini: &Path) {
     *HITS.lock().unwrap() = hits;
 }
 
-fn narrow(ini: &Path) {
+pub fn narrow(ini: &Path) {
     let value = probe_value(ini);
     let mut hits = HITS.lock().unwrap();
 
@@ -137,7 +68,7 @@ fn report(hits: &[usize]) {
 ///
 /// A hit on an item id would be `items[0].id`, which sits at +0x04 in the
 /// struct, so the candidate Bag starts one field earlier.
-fn inspect() {
+pub fn inspect() {
     let hits = HITS.lock().unwrap();
 
     if hits.is_empty() {
@@ -210,7 +141,7 @@ fn decode_bag(addr: usize) {
     log_info!("    +0x3C equipped index = {}", bag.equipped_index);
 }
 
-fn log_regions() {
+pub fn log_regions() {
     let regions = memory::regions();
     let committed: usize = regions.iter().map(|r| r.size).sum();
 
@@ -228,26 +159,6 @@ fn log_regions() {
             r.size / 1024,
             r.protect,
             if r.writable { " W" } else { "" }
-        );
-    }
-}
-
-/// Moves every inventory window by one row and reports where they landed.
-fn scroll(rows: i32) {
-    let moved = registry::scroll_all(rows);
-
-    if moved == 0 {
-        log_info!("Nothing to scroll.");
-        return;
-    }
-
-    for (bag, position, capacity) in registry::positions() {
-        log_info!(
-            "Bag 0x{:08X}: showing slots {}-{} of {}.",
-            bag,
-            position + 1,
-            position + BAG_SIZE,
-            capacity
         );
     }
 }
