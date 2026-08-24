@@ -10,13 +10,6 @@ publish = false
 # cdylib: a plain native DLL, which is all Ultimate ASI Loader can LoadLibrary.
 crate-type = ["cdylib"]
 
+# No dependencies. The Win32 surface this needs is nine functions, declared in
+# src/win32.rs.
 [dependencies]
-windows-sys = { version = "0.61", features = [
-    "Win32_Foundation",
-    "Win32_Security",
-    "Win32_System_Diagnostics_Debug",
-    "Win32_System_LibraryLoader",
-    "Win32_System_Memory",
-    "Win32_System_Threading",
-    "Win32_UI_Input_KeyboardAndMouse",
-] }
