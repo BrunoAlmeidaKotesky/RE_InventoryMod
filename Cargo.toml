@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/re0inv"]
+members = ["crates/re0inv", "crates/analyzer"]
 
 [profile.release]
 # Debug info in release: no usable debugger inside the game, crash dumps are all we get.

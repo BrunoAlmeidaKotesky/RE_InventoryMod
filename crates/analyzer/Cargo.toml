@@ -1,0 +1,21 @@
+[package]
+name = "analyzer"
+version = "0.1.0"
+edition = "2021"
+description = "Static analysis tool for the decrypted RE0 code section"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "re0an"
+path = "src/main.rs"
+
+[dependencies]
+# x86 decoder. The dump is raw 32-bit code with no symbols, so a real decoder
+# is needed to know where one instruction ends and the next begins.
+iced-x86 = { version = "1", default-features = false, features = [
+    "std",
+    "decoder",
+    "intel",
+    "instr_info",
+] }

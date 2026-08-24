@@ -104,6 +104,9 @@ This is the single biggest constraint on the design:
 
 ## Known functions
 
+All three accessors below live in the same neighbourhood, `0x004DA000`-`0x004DE100`,
+which appears to be the inventory module.
+
 ### `0x004DC8B0` — character bag accessor
 
 ```asm
@@ -166,3 +169,94 @@ The sliding window is the chosen approach. Its cost is that game code which
 to reload with, testing whether the inventory is full — only sees the six
 entries currently in view. Each such site needs a hook that consults the full
 store. Enumerating those sites is the next piece of work.
+
+---
+
+## Confirmed layout
+
+The layout above was originally taken from third-party notes. It is now
+confirmed against this build's own code.
+
+### `0x004DB2F0` — equip item
+
+```asm
+mov  esi, [esp+0x10]              ; index argument
+cmp  esi, 0xFFFFFFFF
+je   .unequip
+cmp  esi, 6                       ; capacity check, guards the array assert
+jb   .in_range
+  push <tsl/array.h strings>
+  call assert
+.in_range:
+mov  ebx, [edi+esi*8+4]           ; items[index].id
+...
+mov  [edi+0x3C], esi              ; equipped index = index
+ret  4
+.unequip:
+mov  dword ptr [edi+0x3C], -1     ; -1 means nothing equipped
+ret  4
+```
+
+`[edi + index*8 + 4]` puts the array at `+0x04` with an 8-byte stride, and
+`[edi+0x3C]` is the equipped index, whose empty value is `-1`.
+
+### `0x0057F5A0` — search the bag for an item
+
+```asm
+call 0x004DCA00                   ; bag of the current character
+mov  edi, eax
+add  edi, 4                       ; skip the leading field, land on items[0]
+xor  esi, esi
+.loop:
+cmp  dword ptr [ebx], 3           ; items[i].id == 3 ?
+je   .found
+inc  esi
+add  ebx, 8                       ; next item
+cmp  esi, 6
+jb   .loop
+```
+
+`add edi, 4` reaching `items[0]` confirms the leading 4-byte field at `+0x00`,
+and the loop confirms both the stride and the count.
+
+This is also the clearest example of what the sliding-window design has to work
+around: the function answers "does the player hold item 3?" by walking the six
+entries the game can see. With a larger backing store behind that window, an
+item held outside the window makes this answer no.
+
+### `0x004DCA00` — bag of the current character
+
+Same `+0x20` / `+0x60` mapping as `0x004DC8B0`, but the character id comes from
+a global (`0x00DCBF3C`) rather than an argument.
+
+### Accessor summary
+
+| Address | Character id from | Returns |
+|---|---|---|
+| `0x004DC8B0` | stack argument | `this+0x20` for ids 1, 2, 3; `this+0x60` for ids 5, 7 |
+| `0x004DCA00` | global `0x00DCBF3C` | same mapping |
+| `0x0050DC70` | wrapper over the above, via `tsl::optional` at `0x00DCBF44` | |
+
+---
+
+## Sites that index a six-element array
+
+Found by searching for the inlined `tsl::array` bounds assert guarded by a
+comparison against six. See [the analysis tool](analysis-tool.md) for how.
+
+166 checks across 40 functions. They cluster:
+
+| Range | Functions | Likely role |
+|---|---|---|
+| `0x004DA9A0` - `0x004DDFC0` | 24 | the inventory module itself |
+| `0x005D97A0` - `0x005E7370` | 5 | inventory UI and drawing |
+| `0x0061A630`, `0x0061B8E0` | 2 | 35 and 3 checks; shape suggests serialisation |
+| `0x0057F5A0`, `0x005AF2C0` | 2 | gameplay queries against the bag |
+| `0x0045B600` - `0x004B1800` | 7 | outside the inventory module, probably unrelated arrays |
+
+Two functions dominate: `0x004DA9D0` with 27 checks and `0x004DC070` with 11,
+both inside the inventory module. Those are the first to read in detail.
+
+This count is an upper bound on the work, not a list of required hooks. A site
+that reads one known slot keeps working unchanged under a sliding window; only
+sites that walk the array need to consult the full store.
