@@ -80,7 +80,11 @@ fn take_request() -> bool {
     };
 
     match requested.take() {
-        Some(at) => at.elapsed() < REDRAW_DEADLINE,
+        Some(at) if at.elapsed() < REDRAW_DEADLINE => true,
+        Some(at) => {
+            log_info!("Redraw request expired after {} ms.", at.elapsed().as_millis());
+            false
+        }
         None => false,
     }
 }
@@ -100,18 +104,25 @@ pub unsafe fn redraw_if_requested() {
         return;
     }
 
-    let Some(menu) = menu() else { return };
-    let draw = DRAW.load(Ordering::Relaxed);
+    let Some(menu) = menu() else {
+        log_info!("Redraw wanted, but the panel has never been drawn.");
+        return;
+    };
 
+    let draw = DRAW.load(Ordering::Relaxed);
     if draw == 0 {
+        log_info!("Redraw wanted, but the drawing address is unknown.");
         return;
     }
 
     // The drawing function asks for a bag, which lands back here. Without this
     // the first redraw would ask for another, forever.
     if REDRAWING.swap(true, Ordering::Relaxed) {
+        log_info!("Redraw wanted, but one is already running.");
         return;
     }
+
+    log_info!("Redrawing panel 0x{menu:08X} through 0x{draw:08X}.");
 
     // Cleared by the guard even if the call below unwinds, which a plain store
     // after it would not do. A stuck flag would silently disable every redraw

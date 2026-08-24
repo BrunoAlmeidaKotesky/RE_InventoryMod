@@ -200,11 +200,15 @@ fn pressed(key: i32) -> bool {
 fn dispatch_command(key: i32, ini: &Path, debug_keys: bool) {
     match key {
         VK_PAGE_UP => {
-            registry::scroll_all(-SCROLL_STEP);
+            if registry::scroll_all(-SCROLL_STEP) > 0 {
+                panel::request_redraw();
+            }
             report();
         }
         VK_PAGE_DOWN => {
-            registry::scroll_all(SCROLL_STEP);
+            if registry::scroll_all(SCROLL_STEP) > 0 {
+                panel::request_redraw();
+            }
             report();
         }
 
