@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = ["crates/re0inv"]
+
+[profile.release]
+# Debug info in release: no usable debugger inside the game, crash dumps are all we get.
+debug = 1
