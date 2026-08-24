@@ -43,6 +43,23 @@ pub struct Addresses {
     /// The instruction after those three.
     pub draw_panels_continue: usize,
 
+    // --- Door transition, all inside sDoorLoad::update at 0x00552300 ---
+
+    /// The computation that sets the animation timer, 14 bytes.
+    pub door_duration: usize,
+    /// What is left of that computation afterwards, 28 bytes.
+    pub door_duration_tail: usize,
+    /// The branch used when the door has no model, `mov [edi+0x2C], 1.0f`.
+    pub door_duration_modelless: usize,
+    /// The re-arm that puts a second back when the room change is not done.
+    pub door_duration_rearm: usize,
+
+    /// The four fade durations, each the immediate of a `mov [esp], imm32`.
+    pub door_fade_screen_out: usize,
+    pub door_fade_audio_out: usize,
+    pub door_fade_in: usize,
+    pub door_fade_final: usize,
+
 }
 
 /// `MasterRelease Jan 28 2025 16:45:59`.
@@ -61,6 +78,16 @@ const JAN_2025: Addresses = Addresses {
 
     draw_panels: 0x005E_7240,
     draw_panels_continue: 0x005E_7246,
+
+    door_duration: 0x0055_2A13,
+    door_duration_tail: 0x0055_2A21,
+    door_duration_modelless: 0x0055_2A46,
+    door_duration_rearm: 0x0055_255C,
+
+    door_fade_screen_out: 0x0055_236D,
+    door_fade_audio_out: 0x0055_2380,
+    door_fade_in: 0x0055_24BC,
+    door_fade_final: 0x0055_25AB,
 
 };
 

@@ -16,6 +16,7 @@ use crate::win32::{
 
 mod core;
 mod debug;
+mod feature;
 mod game;
 mod hook;
 mod store;
@@ -138,6 +139,7 @@ fn startup() {
 
     store::registry::set_capacity(config.slots);
     install_hooks(detected.as_ref());
+    install_features(detected.as_ref(), &config);
 
     log_info!("Initialization complete.");
 
@@ -163,6 +165,22 @@ fn install_hooks(build: Option<&Build>) {
     };
 
     unsafe { hook::install_and_keep(&addresses) };
+}
+
+/// Applies the optional improvements, each only if it was asked for.
+///
+/// Kept apart from the inventory hooks: those are what the mod is, and these are
+/// extras. One of them failing, or being switched off, must leave the rest of
+/// the mod exactly as it was.
+fn install_features(build: Option<&Build>, config: &Config) {
+    let Some(addresses) = build.and_then(addresses::for_build) else {
+        if config.doors.skip {
+            log_warn!("Door skip is on, but this build has no verified addresses for it.");
+        }
+        return;
+    };
+
+    unsafe { feature::install_all(&addresses, config) };
 }
 
 fn log_module(module: &Module) {

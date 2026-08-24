@@ -215,7 +215,10 @@ fn dispatch_command(key: i32, ini: &Path, debug_keys: bool) {
         // Everything below is diagnostic and stays behind the config switch.
         _ if !debug_keys => {}
 
-        VK_F8 => unsafe { crate::hook::remove_all_installed() },
+        VK_F8 => unsafe {
+            crate::hook::remove_all_installed();
+            crate::feature::remove_all();
+        },
         VK_F9 => probe::scan(ini),
         VK_F10 => probe::narrow(ini),
         VK_F11 => probe::inspect(),

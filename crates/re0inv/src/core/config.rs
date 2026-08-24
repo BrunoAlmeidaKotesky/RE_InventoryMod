@@ -24,7 +24,18 @@ pub struct Config {
     /// Inventory slots per character. Must be even: the game lays the inventory
     /// out in rows of 2, and two-slot items break on an odd count.
     pub slots: usize,
+    pub doors: DoorsConfig,
     pub debug: DebugConfig,
+}
+
+/// Skipping the animation played when walking through a door.
+#[derive(Clone)]
+pub struct DoorsConfig {
+    pub skip: bool,
+    /// Also shorten the fades around the transition. Without this the wait is
+    /// gone but the screen still fades out and back in around a glimpse of the
+    /// door.
+    pub shorten_fades: bool,
 }
 
 #[derive(Clone)]
@@ -46,6 +57,10 @@ impl Default for Config {
             log_level: Level::Info,
             log_path: "re0inv.log".to_string(),
             slots: DEFAULT_SLOTS,
+            doors: DoorsConfig {
+                skip: false,
+                shorten_fades: true,
+            },
             debug: DebugConfig {
                 dump_text: false,
                 dump_path: "re0hd_text_dump.bin".to_string(),
@@ -83,6 +98,12 @@ impl Config {
             if !v.is_empty() {
                 cfg.log_path = v.to_string();
             }
+        }
+        if let Some(v) = get("skipdoors") {
+            cfg.doors.skip = parse_bool(v, cfg.doors.skip);
+        }
+        if let Some(v) = get("shortenfades") {
+            cfg.doors.shorten_fades = parse_bool(v, cfg.doors.shorten_fades);
         }
         if let Some(v) = get("dumptext") {
             cfg.debug.dump_text = parse_bool(v, cfg.debug.dump_text);

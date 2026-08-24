@@ -53,6 +53,43 @@ impl Patch {
         Some(Patch { address, original })
     }
 
+    /// Overwrites `address`, but only if it holds `expected` first.
+    ///
+    /// `write` puts down whatever it is given, which is right for a detour whose
+    /// caller has already checked. Anything that rewrites an instruction in
+    /// place needs this instead: the expected bytes state what the author
+    /// believed was there, and a mismatch means a different build, or another
+    /// mod that got there first, or an address that was simply wrong. Writing
+    /// anyway turns any of those into corruption with no visible cause.
+    ///
+    /// # Safety
+    /// As `write`, and the replacement must be a valid instruction sequence of
+    /// exactly the same length as what it covers.
+    pub unsafe fn write_expecting(address: usize, expected: &[u8], bytes: &[u8]) -> Option<Patch> {
+        if expected.len() != bytes.len() {
+            log_error!(
+                "0x{:08X}: {} bytes expected but {} to write.",
+                address,
+                expected.len(),
+                bytes.len()
+            );
+            return None;
+        }
+
+        let found = read_bytes(address, expected.len());
+        if found != expected {
+            log_error!(
+                "0x{:08X} holds {} but {} was expected. Not patching.",
+                address,
+                hex(&found),
+                hex(expected)
+            );
+            return None;
+        }
+
+        Patch::write(address, bytes)
+    }
+
     /// Puts the original bytes back.
     ///
     /// # Safety
