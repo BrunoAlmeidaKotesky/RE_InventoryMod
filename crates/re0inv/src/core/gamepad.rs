@@ -28,8 +28,9 @@ const MAX_PADS: u32 = 4;
 
 /// Thumbstick clicks. The shoulder buttons are already spoken for in this
 /// game, and a scroll binding that fights an existing one is worse than none.
-pub const BUTTON_LEFT_THUMB: u16 = 0x0040;
-pub const BUTTON_RIGHT_THUMB: u16 = 0x0080;
+/// Directions on the d-pad.
+pub const BUTTON_DPAD_UP: u16 = 0x0001;
+pub const BUTTON_DPAD_DOWN: u16 = 0x0002;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -80,6 +81,27 @@ impl Controller {
 
         log_debug!("No XInput library found; controller input is off.");
         None
+    }
+
+    /// How far the left stick is pushed vertically, on any connected pad.
+    ///
+    /// Reported so the stick works for menu navigation the way the d-pad does;
+    /// the game accepts either.
+    pub fn left_stick_y(&self) -> i16 {
+        let mut furthest = 0i16;
+
+        for pad in 0..MAX_PADS {
+            let mut state = State::default();
+            if unsafe { (self.get_state)(pad, &mut state) } == ERROR_DEVICE_NOT_CONNECTED {
+                continue;
+            }
+
+            if state.gamepad.thumb_ly.unsigned_abs() > furthest.unsigned_abs() {
+                furthest = state.gamepad.thumb_ly;
+            }
+        }
+
+        furthest
     }
 
     /// Buttons held on any connected controller.

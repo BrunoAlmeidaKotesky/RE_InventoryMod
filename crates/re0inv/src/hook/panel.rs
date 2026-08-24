@@ -35,12 +35,57 @@ pub fn set_continue(address: usize) {
     CONTINUE.store(address, Ordering::Relaxed);
 }
 
+/// Cursor position within the panel, 0 to 5. Two columns, so a row is two.
+const OFFSET_CURSOR: usize = 0x2BC;
+/// Counter the menu bumps as it moves between states.
+const OFFSET_PHASE: usize = 0x294;
+
+/// Slots across the panel. A vertical move is a step of this.
+pub const COLUMNS: i32 = 2;
+
 /// The menu object, if the inventory has been drawn at least once.
 pub fn menu() -> Option<usize> {
     match MENU.load(Ordering::Relaxed) {
         0 => None,
         address => Some(address),
     }
+}
+
+/// Where the selection is, as the game sees it.
+///
+/// Read straight out of the menu object rather than by intercepting the code
+/// that moves it. Several attempts at finding that code hooked instructions the
+/// game never reaches; the field itself is not in any doubt.
+pub fn cursor() -> Option<i32> {
+    let menu = menu()?;
+    crate::debug::memory::read_i32(menu + OFFSET_CURSOR)
+}
+
+/// Moves the selection.
+///
+/// Writing this is what the game itself does when the cursor moves, so it is
+/// also the most likely way to make the panel notice that something changed.
+///
+/// # Safety
+/// The menu object must still be alive, which is true while the inventory is
+/// open and stops being true at some point after it closes. The value is a
+/// single aligned word, so a stale write lands in freed memory rather than
+/// tearing a structure.
+pub unsafe fn set_cursor(value: i32) -> bool {
+    let Some(menu) = menu() else { return false };
+
+    if crate::debug::memory::read_i32(menu + OFFSET_CURSOR).is_none() {
+        return false;
+    }
+
+    *((menu + OFFSET_CURSOR) as *mut i32) = value;
+    true
+}
+
+/// The menu's state counter, for telling an open inventory from a closed one.
+pub fn phase() -> Option<i32> {
+    let menu = menu()?;
+    crate::debug::memory::read_i32(menu + OFFSET_PHASE)
 }
 
 /// How many times the panel has been drawn.

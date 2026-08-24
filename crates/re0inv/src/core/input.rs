@@ -1,23 +1,34 @@
-//! Reading the player's input directly, on the mod's own thread.
+//! Turning the player's own navigation into a scroll.
 //!
-//! Scrolling the inventory ought to happen when the cursor is pushed past the
-//! edge of the panel, using the game's own navigation. That needs the menu code
-//! understood well enough to intervene in it, and it is not yet. Until then the
-//! window moves on a dedicated button, read here.
+//! The panel shows six slots and the store holds more. The wanted behaviour is
+//! the obvious one: with the selection on the bottom row, pressing down brings
+//! the next rows into view instead of doing nothing, and the same upwards.
 //!
-//! The cost of doing it this way is that the mod does not know whether a menu is
-//! even open, and does not follow the player's own button bindings. The benefit
-//! is that it works today, on keyboard and controller both.
+//! The game's own cursor code refuses the move at the edge, and several
+//! attempts at intercepting that refusal hooked instructions it never reaches.
+//! So the selection is read out of the menu object instead, and the direction is
+//! read from the keyboard and the controller here. That works with either, and
+//! needs nothing understood about how the menu dispatches input.
+//!
+//! What it does not do is follow the player's own key bindings. Rebinding the
+//! menu keys would leave scrolling on the defaults, which is the reason to move
+//! this into the game's input handling eventually.
 
-use std::path::PathBuf;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
-use crate::core::gamepad::{Controller, BUTTON_LEFT_THUMB, BUTTON_RIGHT_THUMB};
-use crate::core::logging::log_info;
+use crate::core::gamepad::{Controller, BUTTON_DPAD_DOWN, BUTTON_DPAD_UP};
+use crate::core::logging::{log_debug, log_info};
 use crate::debug::probe;
 use crate::game::inventory::BAG_SIZE;
+use crate::hook::panel;
 use crate::store::registry;
 use crate::win32::{GetAsyncKeyState, KEY_PRESSED};
+
+const VK_UP: i32 = 0x26;
+const VK_DOWN: i32 = 0x28;
+const VK_W: i32 = 0x57;
+const VK_S: i32 = 0x53;
 
 const VK_PAGE_UP: i32 = 0x21;
 const VK_PAGE_DOWN: i32 = 0x22;
@@ -28,7 +39,7 @@ const VK_F10: i32 = 0x79;
 const VK_F11: i32 = 0x7A;
 const VK_F12: i32 = 0x7B;
 
-const KEYS: [i32; 7] = [
+const COMMAND_KEYS: [i32; 7] = [
     VK_PAGE_UP,
     VK_PAGE_DOWN,
     VK_F8,
@@ -38,60 +49,170 @@ const KEYS: [i32; 7] = [
     VK_F12,
 ];
 
-const POLL_INTERVAL: Duration = Duration::from_millis(60);
+/// How far the stick must be pushed to count as a direction. Well past the
+/// resting wobble, so a controller sitting on a desk scrolls nothing.
+const STICK_THRESHOLD: i16 = 16_000;
 
-/// One row of two slots per press. Anything larger skips over items.
+const POLL_INTERVAL: Duration = Duration::from_millis(40);
+
+/// How long after the selection last moved an edge press still counts.
+///
+/// This stands in for a proper "the inventory is open" signal. To be pressing
+/// against the edge, the player had to navigate there, and navigating moves the
+/// selection. Walking around the world does not.
+const NAVIGATION_WINDOW: Duration = Duration::from_secs(5);
+
+/// One row of two slots per press.
 const SCROLL_STEP: i32 = 1;
 
-/// Polls input forever. Runs on its own thread.
-///
-/// `debug_keys` gates the diagnostic commands. Scrolling is a feature and is
-/// always available; the probe is a tool and is not.
 pub fn run(ini: PathBuf, debug_keys: bool) {
-    log_info!(
-        "Inventory scrolling: Page Up and Page Down, or clicking the left and right sticks."
-    );
+    log_info!("Inventory scrolling: press against the top or bottom row of the panel.");
+    log_info!("Page Up and Page Down scroll it directly.");
     if debug_keys {
         log_info!("Debug keys: F8 remove hooks, F9 scan, F10 narrow, F11 inspect, F12 memory map.");
     }
 
     let controller = Controller::load();
 
-    let mut key_was_down = [false; KEYS.len()];
-    let mut pad_was_down: u16 = 0;
+    let mut command_was_down = [false; COMMAND_KEYS.len()];
+    let mut up_was_down = false;
+    let mut down_was_down = false;
+
+    let mut last_cursor: Option<i32> = None;
+    let mut last_moved = Instant::now();
+    let mut last_phase: Option<i32> = None;
 
     loop {
-        for (index, &key) in KEYS.iter().enumerate() {
-            let down = unsafe { GetAsyncKeyState(key) } as u16 & KEY_PRESSED != 0;
+        for (index, &key) in COMMAND_KEYS.iter().enumerate() {
+            let down = pressed(key);
 
-            // Edge trigger: act once per press, not once per poll.
-            if down && !key_was_down[index] {
-                dispatch_key(key, &ini, debug_keys);
+            if down && !command_was_down[index] {
+                dispatch_command(key, &ini, debug_keys);
             }
-            key_was_down[index] = down;
+            command_was_down[index] = down;
         }
 
-        if let Some(controller) = &controller {
-            let buttons = controller.buttons();
-            let pressed = buttons & !pad_was_down;
-            pad_was_down = buttons;
-
-            if pressed & BUTTON_LEFT_THUMB != 0 {
-                scroll(-SCROLL_STEP);
+        // Watching the selection serves two purposes: it says where the cursor
+        // is, and the fact that it moved says the player is in the menu.
+        let cursor = panel::cursor();
+        if cursor != last_cursor {
+            if cursor.is_some() {
+                last_moved = Instant::now();
             }
-            if pressed & BUTTON_RIGHT_THUMB != 0 {
-                scroll(SCROLL_STEP);
-            }
+            last_cursor = cursor;
         }
+
+        let phase = panel::phase();
+        if phase != last_phase {
+            log_debug!(
+                "Menu phase {:?} -> {:?}, cursor {:?}",
+                last_phase,
+                phase,
+                cursor
+            );
+            last_phase = phase;
+        }
+
+        let up = holding_up(&controller);
+        let down = holding_down(&controller);
+
+        if up && !up_was_down {
+            try_edge_scroll(cursor, last_moved, Direction::Up);
+        }
+        if down && !down_was_down {
+            try_edge_scroll(cursor, last_moved, Direction::Down);
+        }
+
+        up_was_down = up;
+        down_was_down = down;
 
         std::thread::sleep(POLL_INTERVAL);
     }
 }
 
-fn dispatch_key(key: i32, ini: &std::path::Path, debug_keys: bool) {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Direction {
+    Up,
+    Down,
+}
+
+/// Scrolls when the selection is pressed against the edge it cannot pass.
+///
+/// The selection is then moved a row the other way, so it stays on the same
+/// item rather than jumping to a different one. That write is also what the
+/// game does when the cursor moves normally, which is the best chance of the
+/// panel noticing that its contents changed.
+fn try_edge_scroll(cursor: Option<i32>, last_moved: Instant, direction: Direction) {
+    let Some(cursor) = cursor else { return };
+
+    if last_moved.elapsed() > NAVIGATION_WINDOW {
+        return;
+    }
+
+    let columns = panel::COLUMNS;
+    let at_edge = match direction {
+        Direction::Up => cursor < columns,
+        Direction::Down => cursor >= BAG_SIZE as i32 - columns,
+    };
+
+    if !at_edge {
+        return;
+    }
+
+    let rows = match direction {
+        Direction::Up => -SCROLL_STEP,
+        Direction::Down => SCROLL_STEP,
+    };
+
+    if registry::scroll_all(rows) == 0 {
+        return;
+    }
+
+    // The contents moved by a row under the selection, so move the selection
+    // the other way to keep it on the same item.
+    let followed = cursor - rows * columns;
+    if (0..BAG_SIZE as i32).contains(&followed) {
+        unsafe { panel::set_cursor(followed) };
+    }
+
+    report();
+}
+
+fn holding_up(controller: &Option<Controller>) -> bool {
+    if pressed(VK_UP) || pressed(VK_W) {
+        return true;
+    }
+
+    controller.as_ref().is_some_and(|pad| {
+        pad.buttons() & BUTTON_DPAD_UP != 0 || pad.left_stick_y() > STICK_THRESHOLD
+    })
+}
+
+fn holding_down(controller: &Option<Controller>) -> bool {
+    if pressed(VK_DOWN) || pressed(VK_S) {
+        return true;
+    }
+
+    controller.as_ref().is_some_and(|pad| {
+        pad.buttons() & BUTTON_DPAD_DOWN != 0 || pad.left_stick_y() < -STICK_THRESHOLD
+    })
+}
+
+fn pressed(key: i32) -> bool {
+    let state = unsafe { GetAsyncKeyState(key) };
+    state as u16 & KEY_PRESSED != 0
+}
+
+fn dispatch_command(key: i32, ini: &Path, debug_keys: bool) {
     match key {
-        VK_PAGE_UP => scroll(-SCROLL_STEP),
-        VK_PAGE_DOWN => scroll(SCROLL_STEP),
+        VK_PAGE_UP => {
+            registry::scroll_all(-SCROLL_STEP);
+            report();
+        }
+        VK_PAGE_DOWN => {
+            registry::scroll_all(SCROLL_STEP);
+            report();
+        }
 
         // Everything below is diagnostic and stays behind the config switch.
         _ if !debug_keys => {}
@@ -105,25 +226,8 @@ fn dispatch_key(key: i32, ini: &std::path::Path, debug_keys: bool) {
     }
 }
 
-/// Moves every inventory window and reports where each one landed.
-fn scroll(rows: i32) {
-    if registry::scroll_all(rows) == 0 {
-        log_info!("Nothing to scroll.");
-        return;
-    }
-
-    // The panel is built when the inventory opens, not redrawn each frame, so
-    // a scroll only shows after closing and reopening. Reporting what is known
-    // about the drawing is what a fix for that will be built on.
-    match crate::hook::panel::menu() {
-        Some(menu) => log_info!(
-            "Menu 0x{:08X}, drawn {} time(s) so far.",
-            menu,
-            crate::hook::panel::draw_count()
-        ),
-        None => log_info!("The panel has not been drawn yet."),
-    }
-
+/// Reports where each window landed, and what the panel has been told.
+fn report() {
     for (bag, position, capacity, empty) in registry::positions() {
         log_info!(
             "Bag 0x{:08X}: showing slots {}-{} of {}, {} free.",
@@ -134,4 +238,10 @@ fn scroll(rows: i32) {
             empty
         );
     }
+
+    log_debug!(
+        "Panel drawn {} time(s); cursor now {:?}.",
+        panel::draw_count(),
+        panel::cursor()
+    );
 }
