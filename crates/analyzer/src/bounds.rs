@@ -49,10 +49,8 @@ pub const DEFAULT_ARRAY_ASSERT_STRING: u64 = 0x00CB_57D0;
 
 #[derive(Debug, Clone)]
 pub struct Site {
-    /// Address of the `cmp reg, N`.
+    /// Address of the `cmp reg, N` that guards the assert.
     pub check: u64,
-    /// Address of the assert's `push`.
-    pub assert: u64,
 }
 
 /// Finds bound checks against `capacity` that guard the array assert.
@@ -87,10 +85,7 @@ pub fn find(image: &Image, capacity: u8, assert_string: u64) -> Vec<Site> {
         }
 
         if let Some(check) = found {
-            out.push(Site {
-                check,
-                assert: image.base + i as u64,
-            });
+            out.push(Site { check });
         }
     }
 
@@ -187,8 +182,8 @@ pub fn report(image: &Image, capacity: u8, assert_string: u64) {
     );
     println!();
     println!(
-        "{:<12} {:>7} {:>10} {:>7}  {}",
-        "function", "checks", "iterating", "single", "iterating check sites"
+        "{:<12} {:>7} {:>10} {:>7}  iterating check sites",
+        "function", "checks", "iterating", "single"
     );
     println!("{}", "-".repeat(92));
 

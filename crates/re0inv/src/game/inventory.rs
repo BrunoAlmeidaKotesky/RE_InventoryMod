@@ -36,6 +36,25 @@ pub struct Item {
     pub count: i32,
 }
 
+// Used only from the mod's own store, which nothing calls into yet.
+#[allow(dead_code)]
+impl Item {
+    /// An unoccupied slot. The game marks these with id zero.
+    pub const EMPTY: Item = Item { id: 0, count: 0 };
+
+    /// The entry that occupies the second slot of a two-slot item.
+    pub const fn filler() -> Item {
+        Item {
+            id: SLOT_TWO_FILLER,
+            count: 0,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.id == Item::EMPTY.id
+    }
+}
+
 /// A character's inventory as the game stores it. 64 bytes.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]

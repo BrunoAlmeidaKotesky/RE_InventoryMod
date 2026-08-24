@@ -25,7 +25,6 @@ const MAX_INSTRUCTIONS: usize = 200_000;
 #[derive(Debug, Clone)]
 pub struct Use {
     pub va: u64,
-    pub base: Register,
     pub text: String,
 }
 
@@ -49,7 +48,6 @@ pub fn find(image: &Image, displacement: u32, low: u64, high: u64) -> Vec<Use> {
         if instruction.memory_displacement32() == displacement {
             out.push(Use {
                 va: line.va,
-                base,
                 text: line.text.clone(),
             });
         }

@@ -176,8 +176,8 @@ pub fn report(image: &Image, target: u64) {
     println!("it counts unrelated struct offsets and is not a verdict.");
     println!();
     println!(
-        "{:<12} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5}  {:<16} {}",
-        "function", "sites", "cmp6", "0x30", "idx8", "+34", "+3C", "verdict", "fn"
+        "{:<12} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5}  {:<16} fn",
+        "function", "sites", "cmp6", "0x30", "idx8", "+34", "+3C", "verdict"
     );
     println!("{}", "-".repeat(88));
 

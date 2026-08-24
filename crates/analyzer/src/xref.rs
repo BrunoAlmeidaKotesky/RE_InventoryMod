@@ -104,9 +104,7 @@ pub fn enclosing_function(image: &Image, site: u64, max_back: u64) -> Option<u64
     let mut va = site;
 
     while va > lowest {
-        let Some(window) = image.slice(va - 4, 4) else {
-            return None;
-        };
+        let window = image.slice(va - 4, 4)?;
 
         if window == [0xCC, 0xCC, 0xCC, 0xCC] {
             return Some(va);

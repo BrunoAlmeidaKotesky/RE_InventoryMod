@@ -20,7 +20,7 @@ pub type Pattern = Vec<Option<u8>>;
 pub fn parse(text: &str) -> Result<Pattern, String> {
     let cleaned: String = text.chars().filter(|c| !c.is_whitespace()).collect();
 
-    if cleaned.len() % 2 != 0 {
+    if !cleaned.len().is_multiple_of(2) {
         return Err(format!("'{text}' has an odd number of hex digits"));
     }
 

@@ -16,6 +16,7 @@ use crate::win32::{
 mod core;
 mod debug;
 mod game;
+mod store;
 mod win32;
 
 use crate::core::config::Config;
