@@ -363,6 +363,62 @@ pub fn with_view<R>(view: *const Bag, action: impl FnOnce(&mut Window) -> R) -> 
 /// this module for it.
 pub const VISIBLE_SLOTS: usize = BAG_SIZE;
 
+/// Shows the window at each position in turn until `ask` is satisfied.
+///
+/// This exists because the game answers "is this item in the bag" by walking
+/// six slots, and six slots is all it can be shown. Rather than reimplement
+/// what counts as a match — which covers item types, the personal slot and
+/// several special ids — the window is moved and the game's own answer is
+/// taken. Slower on a miss, and exactly as correct as the original.
+///
+/// The window is left wherever the answer was found, deliberately: the answer
+/// is a slot number, and the caller is about to use it to reach into the six
+/// slots it can see. Putting the window back would invalidate the very number
+/// just returned.
+///
+/// Returns `None` when the pointer is not one of ours, or when no position
+/// satisfied `ask`; the window is then back where it started.
+pub fn probe_positions(view: *mut Bag, mut ask: impl FnMut() -> i32) -> Option<i32> {
+    let mut registry = REGISTRY.lock().ok()?;
+
+    let index = registry
+        .entries
+        .iter()
+        .position(|entry| std::ptr::eq(entry.view as *const Bag, view))?;
+
+    let entry = &mut registry.entries[index];
+
+    let mut bag = entry.read_view();
+    entry.window.read_from(&bag);
+
+    let started_at = entry.window.position();
+    let candidates: Vec<usize> = entry.window.positions().collect();
+
+    for position in candidates {
+        entry.window.set_position(position);
+        entry.window.write_into(&mut bag);
+        entry.write_view(&bag);
+
+        // The game reads the view we just published. It does not come back
+        // through this mod, so holding the lock across it is safe.
+        let answer = ask();
+
+        if answer >= 0 {
+            return Some(answer);
+        }
+
+        // Whatever the game left in the view during the search is its business
+        // and not a change to record, so the bag is re-read rather than kept.
+        bag = entry.read_view();
+    }
+
+    entry.window.set_position(started_at);
+    entry.window.write_into(&mut bag);
+    entry.write_view(&bag);
+
+    None
+}
+
 /// Sends every window back to the first slot.
 ///
 /// Used to wrap around at the end of the list. Scrolling only downwards keeps

@@ -8,6 +8,7 @@ pub mod bag;
 pub mod detour;
 pub mod panel;
 pub mod patch;
+pub mod search;
 
 use std::sync::Mutex;
 
@@ -153,6 +154,18 @@ pub unsafe fn install_all(addresses: &Addresses) -> Hooks {
         addresses.bag_first_empty,
         bag::first_empty_stub as unsafe extern "C" fn() as usize,
         &FIRST_EMPTY_PROLOGUE,
+    );
+
+    // `sub esp, 8; push esi; push edi` - exactly the five bytes a jump needs,
+    // with no instruction left half-overwritten.
+    const FIND_ITEM_PROLOGUE: [u8; 5] = [0x83, 0xEC, 0x08, 0x56, 0x57];
+
+    search::set_continue(addresses.bag_find_item_continue);
+    hooks.detour(
+        "Bag::find_item",
+        addresses.bag_find_item,
+        search::find_item_stub as unsafe extern "C" fn() as usize,
+        &FIND_ITEM_PROLOGUE,
     );
 
     log_info!("{} hook(s) installed.", hooks.len());

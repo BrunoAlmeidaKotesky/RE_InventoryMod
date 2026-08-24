@@ -101,6 +101,23 @@ impl Window {
         self.position = 0;
     }
 
+    /// Moves the window to `position`, clamped and forced even.
+    ///
+    /// Even alignment is not cosmetic. A two-slot item occupies an even index
+    /// and the filler after it an odd one, so a window starting on an odd index
+    /// shows the tail of an item without its head.
+    pub fn set_position(&mut self, position: usize) -> bool {
+        let target = (position & !1).min(self.max_position());
+        let changed = target != self.position;
+        self.position = target;
+        changed
+    }
+
+    /// Every position the window can rest at, in order.
+    pub fn positions(&self) -> impl Iterator<Item = usize> {
+        (0..=self.max_position()).step_by(2)
+    }
+
     /// Copies the visible slots into the bag the game reads.
     ///
     /// The personal item is left alone: it is a slot of its own, outside the

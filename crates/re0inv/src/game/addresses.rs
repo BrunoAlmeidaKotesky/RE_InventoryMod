@@ -18,6 +18,14 @@ pub struct Addresses {
     pub bag_count_empty: usize,
     /// `int __thiscall(Bag*)` - index of the first empty slot, or -1 if full.
     pub bag_first_empty: usize,
+    /// `int __thiscall(Bag*, int id)` - slot holding an item, or -1.
+    ///
+    /// Every question the game asks about what the player is carrying comes
+    /// through here. The two narrower searches it dispatches to have no other
+    /// caller, so this is the only place an item can be missed.
+    pub bag_find_item: usize,
+    /// The fourth instruction of that function, where its prologue ends.
+    pub bag_find_item_continue: usize,
 
     /// `Bag* __thiscall(owner)` - the played character's bag. Called by the
     /// panel drawing code every frame, which makes it the one that matters.
@@ -80,6 +88,8 @@ pub struct Addresses {
 const JAN_2025: Addresses = Addresses {
     bag_count_empty: 0x004D_B480,
     bag_first_empty: 0x004D_B440,
+    bag_find_item: 0x004D_B130,
+    bag_find_item_continue: 0x004D_B135,
 
     player_bag: 0x004D_C8E0,
     partner_bag: 0x004D_CA00,
