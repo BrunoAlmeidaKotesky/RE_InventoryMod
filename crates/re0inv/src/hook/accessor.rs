@@ -293,12 +293,23 @@ fn played_id() -> Option<i32> {
     Some(unsafe { thiscall0(addresses.character_id, character) } as i32)
 }
 
-/// Whether an address belongs to the inventory screen's code.
+/// Whether this call is the inventory screen asking.
 ///
-/// The menu lives in one stretch: its state machine at `0x005E1D10`, the panel
-/// drawing at `0x005E7240`, and the screen's setup below both. Nothing else the
-/// mod cares about sits in that range.
+/// Most of the screen lives in one stretch: its state machine at `0x005E1D10`,
+/// the panel drawing at `0x005E7240`, and the setup below both.
+///
+/// The exception is the one that mattered. Moving an item from one half of the
+/// screen to the other is done by a helper at `0x004DDFC0`, which fetches both
+/// bags itself and so asks from its own address, nowhere near the rest of the
+/// menu. Left out, every deposit went to the partner's real inventory — or,
+/// with no partner in the room, the accessor answered null and the helper's
+/// `test edi, edi` turned the whole swap into nothing at all.
+///
+/// Including it is safe: it has exactly one caller, `0x005E43F3`, and that is
+/// the exchange handler inside the screen.
 fn is_menu_code(address: usize) -> bool {
     const MENU_CODE: std::ops::Range<usize> = 0x005D_0000..0x005F_0000;
-    MENU_CODE.contains(&address)
+    const SWAP_HELPER: std::ops::Range<usize> = 0x004D_DFC0..0x004D_E0B8;
+
+    MENU_CODE.contains(&address) || SWAP_HELPER.contains(&address)
 }
