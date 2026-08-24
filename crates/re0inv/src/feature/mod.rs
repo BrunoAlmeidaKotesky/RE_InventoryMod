@@ -7,6 +7,7 @@
 
 pub mod doors;
 pub mod item_box;
+pub mod menu;
 pub mod typewriter;
 
 use std::sync::Mutex;
@@ -20,12 +21,14 @@ use crate::game::addresses::Addresses;
 static INSTALLED: Mutex<Installed> = Mutex::new(Installed {
     doors: None,
     typewriter: None,
+    menu: None,
 });
 
 #[derive(Default)]
 struct Installed {
     doors: Option<doors::Doors>,
     typewriter: Option<typewriter::Typewriter>,
+    menu: Option<menu::Menu>,
 }
 
 /// Applies every feature the configuration asks for.
@@ -40,6 +43,12 @@ pub unsafe fn install_all(addresses: &Addresses, config: &Config) {
 
         let prompt = typewriter::Typewriter::install(addresses);
         keep(|installed| installed.typewriter = Some(prompt));
+
+        // The screen itself has to agree that the partner half is part of it.
+        // Without this the box opens into the single-panel layout the game
+        // shows whenever the two characters are apart.
+        let screen = menu::Menu::install(addresses);
+        keep(|installed| installed.menu = Some(screen));
     }
 
     if config.doors.skip {
@@ -66,6 +75,11 @@ pub unsafe fn remove_all() {
     };
 
     let mut removed = 0;
+
+    if let Some(screen) = installed.menu.as_mut() {
+        screen.remove();
+        removed += 1;
+    }
 
     if let Some(prompt) = installed.typewriter.as_mut() {
         prompt.remove();

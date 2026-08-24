@@ -87,6 +87,22 @@ pub struct Addresses {
     /// phase already pushed. Five bytes.
     pub typewriter_open_screen: usize,
 
+    // --- The inventory screen ---
+
+    /// `call play_menu_animation` as the screen opens. Five bytes, with the
+    /// animation's id already on the stack; id 1 brings the partner half in.
+    pub inventory_open_animation: usize,
+    /// `__thiscall(menu, animation)` - what that call goes to.
+    pub play_menu_animation: usize,
+    /// `inc dword ptr [edi+0x294]` where the screen finishes setting itself up.
+    /// Six bytes, with the menu in `edi`.
+    pub inventory_menu_start: usize,
+    /// `cmp byte ptr [edi+0x2CA], 1` on the path taken when the played
+    /// character changes. Seven bytes, and the `jne` after it reads its flags.
+    pub inventory_change_character: usize,
+    /// `mov eax, [esi+0x60]; push 0` as the screen closes. Five bytes.
+    pub inventory_menu_close: usize,
+
     /// `__thiscall(manager, phase)` - puts the game into a screen. Phase 5 is
     /// the inventory and 6 is saving.
     pub set_room_phase: usize,
@@ -148,6 +164,12 @@ const JAN_2025: Addresses = Addresses {
     typewriter_no_ribbon: 0x0057_ADA4,
     typewriter_choice: 0x0057_ADF7,
     typewriter_open_screen: 0x0057_AE36,
+
+    inventory_open_animation: 0x005E_1EBF,
+    play_menu_animation: 0x005D_C170,
+    inventory_menu_start: 0x005E_1EF6,
+    inventory_change_character: 0x005E_2F3A,
+    inventory_menu_close: 0x005D_8D03,
 
     set_room_phase: 0x0061_0E00,
     prepare_inventory: 0x005D_7550,

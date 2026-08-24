@@ -226,31 +226,23 @@ static SAVED_EXCHANGE: Mutex<Option<u8>> = Mutex::new(None);
 /// Says once what the fields held before the box changed them.
 static FORCED: AtomicBool = AtomicBool::new(false);
 
-/// Puts the menu into the state the box needs, remembering what it replaced.
-///
-/// Called on every draw rather than once. The game writes both fields itself —
-/// on opening, and again whenever the played character changes — so a single
-/// write at the start would be undone by the game's own bookkeeping.
+/// Marks the partner half as being on screen.
 ///
 /// # Safety
-/// `menu` must be the object the panel was drawn against, which is alive for as
-/// long as the screen is.
-unsafe fn show_partner_half(menu: usize) {
+/// `menu` must be a live menu object.
+pub unsafe fn mark_partner_shown(menu: usize) {
     let shown = (menu + OFFSET_PARTNER_SHOWN) as *mut u8;
-    let exchange = (menu + OFFSET_EXCHANGE) as *mut u8;
-
-    if !FORCED.swap(true, Ordering::Relaxed) {
-        log_info!(
-            "Box showing: partner half was {}, exchange was {}.",
-            shown.read_volatile(),
-            exchange.read_volatile()
-        );
-    }
-
     if shown.read_volatile() == 0 {
         shown.write_volatile(1);
     }
+}
 
+/// Forces exchanging open, remembering what the game had there.
+///
+/// # Safety
+/// `menu` must be a live menu object.
+pub unsafe fn allow_exchange(menu: usize) {
+    let exchange = (menu + OFFSET_EXCHANGE) as *mut u8;
     let current = exchange.read_volatile();
 
     if current == EXCHANGE_ALLOWED {
@@ -258,12 +250,48 @@ unsafe fn show_partner_half(menu: usize) {
     }
 
     if let Ok(mut saved) = SAVED_EXCHANGE.lock() {
-        // Only the first value seen is the game's own. Anything later is
+        // Only the first value seen is the game own. Anything later is
         // whatever it recomputed while the box was already showing.
         saved.get_or_insert(current);
     }
 
     exchange.write_volatile(EXCHANGE_ALLOWED);
+}
+
+/// Puts the exchange field back, for a menu we still have in hand.
+///
+/// # Safety
+/// `menu` must be a live menu object.
+pub unsafe fn restore_exchange(menu: usize) {
+    let Ok(saved) = SAVED_EXCHANGE.lock() else {
+        return;
+    };
+
+    if let Some(original) = *saved {
+        ((menu + OFFSET_EXCHANGE) as *mut u8).write_volatile(original);
+    }
+}
+
+/// Puts the menu into the state the box needs, remembering what it replaced.
+///
+/// Called on every draw as well as from the screen own setup. The game writes
+/// both fields itself, so a single write at the start would be undone by its
+/// own bookkeeping.
+///
+/// # Safety
+/// `menu` must be the object the panel was drawn against, which is alive for as
+/// long as the screen is.
+unsafe fn show_partner_half(menu: usize) {
+    if !FORCED.swap(true, Ordering::Relaxed) {
+        log_info!(
+            "Box showing: partner half {}, exchange {}.",
+            ((menu + OFFSET_PARTNER_SHOWN) as *const u8).read_volatile(),
+            ((menu + OFFSET_EXCHANGE) as *const u8).read_volatile()
+        );
+    }
+
+    mark_partner_shown(menu);
+    allow_exchange(menu);
 }
 
 /// Puts the exchange field back to whatever the game had in it.
