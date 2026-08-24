@@ -3,5 +3,6 @@
 
 pub mod addresses;
 pub mod build;
+pub mod call;
 pub mod inventory;
 pub mod module;

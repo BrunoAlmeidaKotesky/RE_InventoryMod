@@ -88,7 +88,7 @@ extern "C" fn count_empty(bag: *mut Bag) -> i32 {
             return 0;
         }
 
-        let empty = registry::with_store(bag, |window| window.store().count_empty() as i32)
+        let empty = registry::with_view(bag, |window| window.store().count_empty() as i32)
             .unwrap_or_else(|| visible_empty_count(&*bag));
 
         if should_log(&COUNT_EMPTY_CALLS, "count_empty") {
@@ -143,7 +143,7 @@ extern "C" fn first_empty(bag: *mut Bag) -> i32 {
             return NO_EMPTY_SLOT;
         }
 
-        let found = registry::with_store(bag, |window| {
+        let found = registry::with_view(bag, |window| {
             if let Some(slot) = window.first_visible_empty() {
                 return slot as i32;
             }

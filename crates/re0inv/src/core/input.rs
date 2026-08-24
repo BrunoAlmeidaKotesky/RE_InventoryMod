@@ -110,13 +110,14 @@ fn scroll(rows: i32) {
         return;
     }
 
-    for (bag, position, capacity) in registry::positions() {
+    for (bag, position, capacity, empty) in registry::positions() {
         log_info!(
-            "Bag 0x{:08X}: showing slots {}-{} of {}.",
+            "Bag 0x{:08X}: showing slots {}-{} of {}, {} free.",
             bag,
             position + 1,
             position + BAG_SIZE,
-            capacity
+            capacity,
+            empty
         );
     }
 }

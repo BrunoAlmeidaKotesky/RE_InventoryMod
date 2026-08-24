@@ -3,9 +3,9 @@
 //! Everything installed goes through the registry here, so there is always one
 //! place that knows what has been changed and can put it back.
 
+pub mod accessor;
 pub mod bag;
 pub mod detour;
-pub mod menu;
 pub mod patch;
 
 use std::sync::Mutex;
@@ -97,8 +97,26 @@ pub unsafe fn install_all(addresses: &Addresses) -> Hooks {
     const COUNT_EMPTY_PROLOGUE: [u8; 5] = [0x53, 0x56, 0x33, 0xF6, 0x33];
     // `push esi; xor esi, esi; push edi; lea ...`
     const FIRST_EMPTY_PROLOGUE: [u8; 5] = [0x56, 0x33, 0xF6, 0x57, 0x8D];
-    // `mov eax, [edi+0x2BC]`, on both cursor paths.
-    const CURSOR_READ: [u8; 6] = [0x8B, 0x87, 0xBC, 0x02, 0x00, 0x00];
+    // `sub esp, 8; push esi; mov ...`, shared by both bag accessors.
+    const ACCESSOR_PROLOGUE: [u8; 5] = [0x83, 0xEC, 0x08, 0x56, 0x8B];
+
+    // The accessors come first. Everything else in the mod works on a bag the
+    // game was handed, and until these are in place that is the game's own.
+    accessor::set_addresses(addresses);
+
+    hooks.detour(
+        "Inventory::player_bag",
+        addresses.player_bag,
+        accessor::player_bag_stub as unsafe extern "C" fn() as usize,
+        &ACCESSOR_PROLOGUE,
+    );
+
+    hooks.detour(
+        "Inventory::partner_bag",
+        addresses.partner_bag,
+        accessor::partner_bag_stub as unsafe extern "C" fn() as usize,
+        &ACCESSOR_PROLOGUE,
+    );
 
     hooks.detour(
         "Bag::count_empty",
@@ -112,36 +130,6 @@ pub unsafe fn install_all(addresses: &Addresses) -> Hooks {
         addresses.bag_first_empty,
         bag::first_empty_stub as unsafe extern "C" fn() as usize,
         &FIRST_EMPTY_PROLOGUE,
-    );
-
-    // Observation only: these report what the menu holds and change nothing.
-    // They have to know where to hand control back before they are installed.
-    menu::set_up_continue(addresses.cursor_read_up_continue);
-    menu::set_down_continue(addresses.cursor_read_down_continue);
-
-    hooks.detour(
-        "Menu::cursor_read_up",
-        addresses.cursor_read_up,
-        menu::cursor_up_stub as unsafe extern "C" fn() as usize,
-        &CURSOR_READ,
-    );
-
-    hooks.detour(
-        "Menu::cursor_read_down",
-        addresses.cursor_read_down,
-        menu::cursor_down_stub as unsafe extern "C" fn() as usize,
-        &CURSOR_READ,
-    );
-
-    // `test [eax+0xB70], esi`
-    const MODE_TEST: [u8; 6] = [0x85, 0xB0, 0x70, 0x0B, 0x00, 0x00];
-
-    menu::set_mode_continue(addresses.menu_mode_test_continue);
-    hooks.detour(
-        "Menu::mode_test",
-        addresses.menu_mode_test,
-        menu::mode_test_stub as unsafe extern "C" fn() as usize,
-        &MODE_TEST,
     );
 
     log_info!("{} hook(s) installed.", hooks.len());

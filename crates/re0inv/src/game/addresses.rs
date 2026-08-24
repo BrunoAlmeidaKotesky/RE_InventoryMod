@@ -19,23 +19,21 @@ pub struct Addresses {
     /// `int __thiscall(Bag*)` - index of the first empty slot, or -1 if full.
     pub bag_first_empty: usize,
 
-    /// `mov eax, [edi+0x2BC]` on the cursor-up path. Six bytes, no flags.
-    pub cursor_read_up: usize,
-    /// The instruction after it, where the trampoline hands control back.
-    pub cursor_read_up_continue: usize,
+    /// `Bag* __thiscall(owner)` - the played character's bag. Called by the
+    /// panel drawing code every frame, which makes it the one that matters.
+    pub player_bag: usize,
+    /// `Bag* __thiscall(owner)` - the partner's bag.
+    pub partner_bag: usize,
 
-    /// The same pair on the cursor-down path.
-    pub cursor_read_down: usize,
-    pub cursor_read_down_continue: usize,
+    /// Global holding the object that knows who the characters are.
+    pub character_holder: usize,
+    /// `__thiscall(holder)` - the character being played.
+    pub played_character: usize,
+    /// `__thiscall(holder)` - the other character.
+    pub partner_character: usize,
+    /// `__thiscall(character)` - that character's id.
+    pub character_id: usize,
 
-    /// `test [eax+0xB70], esi`, the first of the two state tests the menu makes
-    /// before choosing a cursor path. Six bytes.
-    ///
-    /// The second test, six bytes later, was tried first and never ran: the
-    /// branch between them is taken in ordinary play. This one is upstream of
-    /// that branch.
-    pub menu_mode_test: usize,
-    pub menu_mode_test_continue: usize,
 }
 
 /// `MasterRelease Jan 28 2025 16:45:59`.
@@ -43,14 +41,14 @@ const JAN_2025: Addresses = Addresses {
     bag_count_empty: 0x004D_B480,
     bag_first_empty: 0x004D_B440,
 
-    cursor_read_up: 0x005E_3BD1,
-    cursor_read_up_continue: 0x005E_3BD7,
+    player_bag: 0x004D_C8E0,
+    partner_bag: 0x004D_CA00,
 
-    cursor_read_down: 0x005E_3C99,
-    cursor_read_down_continue: 0x005E_3C9F,
+    character_holder: 0x00DC_BF3C,
+    played_character: 0x004E_C780,
+    partner_character: 0x0096_CD30,
+    character_id: 0x0052_2AF0,
 
-    menu_mode_test: 0x005E_3BAD,
-    menu_mode_test_continue: 0x005E_3BB3,
 };
 
 pub fn for_build(build: &Build) -> Option<Addresses> {

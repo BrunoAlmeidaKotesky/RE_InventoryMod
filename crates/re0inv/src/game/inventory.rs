@@ -57,7 +57,7 @@ impl Item {
 
 /// A character's inventory as the game stores it. 64 bytes.
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Bag {
     pub unknown00: i32,
     pub items: [Item; BAG_SIZE],

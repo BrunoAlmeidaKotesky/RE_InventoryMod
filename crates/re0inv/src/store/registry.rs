@@ -1,32 +1,69 @@
 //! Which store belongs to which of the game's bags.
 //!
-//! The game keeps two bags alive at once, adjacent fields of one object at
-//! `+0x20` and `+0x60`, and hands whichever one it means to each method call.
-//! So a store has to be found by the bag it stands behind.
+//! # The view the game is given
+//!
+//! The game reaches a bag through an accessor, every time it needs one,
+//! including once per frame while drawing the inventory panel. That is the
+//! point where a larger inventory becomes possible: the accessor is replaced,
+//! and it answers with a sixty-four byte bag this mod owns rather than the one
+//! inside the game's object.
+//!
+//! Writing into the game's own bag instead was tried first and does not work
+//! for anything the player can see. The panel is drawn from whatever the
+//! accessor returned, so changing memory the accessor did not point at changes
+//! nothing on screen.
 //!
 //! # Keeping the two in step
 //!
-//! The game writes into the bag directly, at sites this mod does not intercept.
-//! Rather than trying to hook every write, every intercepted call starts by
-//! reading the visible slots back into the store, and ends by writing the
-//! visible slots out again.
-//!
-//! That works because the window only moves while we hold it: whatever the game
-//! wrote at visible slot `k` is still at store index `position + k` the next
-//! time we look.
+//! The game writes into the view it was handed, at sites this mod does not
+//! intercept. So every accessor call reads the view back into the store before
+//! refreshing it from the store. Whatever the game wrote at visible slot `k` is
+//! still at store index `position + k`, because the window only moves while we
+//! hold it.
 
 use std::sync::Mutex;
 
 use crate::core::logging::{log_debug, log_info};
-use crate::game::inventory::{Bag, BAG_BYTES};
+use crate::game::inventory::{Bag, Item, BAG_SIZE};
 use crate::store::window::Window;
 
-/// A bag the game owns, and the storage standing behind it.
+/// One character's storage, and the bag the game is shown in its place.
 struct Entry {
-    /// Address of the game's bag. Bags live inside a heap object, so this is
-    /// only meaningful for as long as that object does.
-    bag: usize,
+    /// The object holding the game's own bag, and the offset within it. Together
+    /// these identify a character's inventory across frames, which a heap
+    /// address on its own does not.
+    owner: usize,
+    offset: usize,
+
+    /// The bag handed to the game. Boxed so its address never moves: the game
+    /// keeps hold of it between calls.
+    view: Box<Bag>,
+
+    /// What the game's own bag held last time this entry was looked at.
+    ///
+    /// Not every write goes through the accessor. Loading a save, in
+    /// particular, may drop an inventory straight into the game's object. That
+    /// would otherwise be invisible here, and the store would overwrite it with
+    /// stale contents the next time the panel was drawn.
+    mirror: Bag,
+
     window: Window,
+}
+
+impl Entry {
+    /// Refreshes the view from the store, after taking in whatever the game
+    /// wrote into it since last time.
+    fn sync(&mut self) {
+        self.window.read_from(&self.view);
+        self.window.write_into(&mut self.view);
+    }
+
+    /// Starts the store over from a bag the game filled in behind our back.
+    fn reseed(&mut self, source: &Bag) {
+        self.window = Window::new(self.window.store().capacity());
+        self.window.read_from(source);
+        *self.view = *source;
+    }
 }
 
 pub struct Registry {
@@ -43,29 +80,10 @@ impl Registry {
         }
     }
 
-    /// Finds the store for a bag, creating one seeded from the bag's current
-    /// contents the first time that bag is seen.
-    fn window_for(&mut self, bag: *const Bag) -> &mut Window {
-        let address = bag as usize;
-
-        if let Some(position) = self.entries.iter().position(|e| e.bag == address) {
-            return &mut self.entries[position].window;
-        }
-
-        let mut window = Window::new(self.capacity);
-
-        // Seed from what the game already has there, so a store that appears
-        // mid-game inherits the inventory instead of emptying it.
-        window.read_from(unsafe { &*bag });
-
-        log_info!(
-            "New store for the bag at 0x{:08X}: {} slots.",
-            address,
-            window.store().capacity()
-        );
-
-        self.entries.push(Entry { bag: address, window });
-        &mut self.entries.last_mut().expect("just pushed").window
+    fn find(&mut self, owner: usize, offset: usize) -> Option<usize> {
+        self.entries
+            .iter()
+            .position(|e| e.owner == owner && e.offset == offset)
     }
 }
 
@@ -79,37 +97,78 @@ pub fn set_capacity(slots: usize) {
     }
 }
 
-/// Runs `action` against the store behind `bag`, syncing both ways around it.
+/// The bag to hand the game in place of the one at `owner + offset`.
 ///
-/// Returns `None` if the registry is unusable, which leaves the caller to fall
-/// back on the bag itself rather than guess.
+/// The first time a character's inventory is seen, its store is seeded from
+/// what the game already has there, so an inventory that exists before the mod
+/// looks at it is inherited rather than emptied.
+///
+/// Returns null if the store is unavailable, which the caller turns back into
+/// the game's own bag. Handing over a half-initialised view would be worse than
+/// not modding that call at all.
 ///
 /// # Safety
-/// `bag` must point at a readable, writable `Bag` for the duration of the call.
-pub unsafe fn with_store<R>(bag: *mut Bag, action: impl FnOnce(&mut Window) -> R) -> Option<R> {
-    // A poisoned registry means a previous call panicked while holding it. The
-    // store's contents cannot be trusted after that, so stop using it rather
-    // than hand the game answers derived from it.
-    let mut registry = REGISTRY.lock().ok()?;
+/// `owner + offset` must point at a readable `Bag`.
+pub unsafe fn view_for(owner: usize, offset: usize) -> *mut Bag {
+    let Ok(mut registry) = REGISTRY.lock() else {
+        return std::ptr::null_mut();
+    };
 
-    let window = registry.window_for(bag);
+    let own = &mut *((owner + offset) as *mut Bag);
 
-    // Pull in anything the game wrote since we last looked.
-    window.read_from(&*bag);
+    let index = match registry.find(owner, offset) {
+        Some(index) => index,
+        None => {
+            let capacity = registry.capacity;
 
-    let result = action(window);
+            let mut window = Window::new(capacity);
+            window.read_from(own);
 
-    // Push back out: the action may have moved the window.
-    window.write_into(&mut *bag);
+            log_info!(
+                "New store for the bag at 0x{:08X}+0x{:02X}: {} slots.",
+                owner,
+                offset,
+                window.store().capacity()
+            );
 
-    Some(result)
+            registry.entries.push(Entry {
+                owner,
+                offset,
+                view: Box::new(*own),
+                mirror: *own,
+                window,
+            });
+
+            registry.entries.len() - 1
+        }
+    };
+
+    let entry = &mut registry.entries[index];
+
+    // Someone wrote the game's own bag without going through here. Whatever it
+    // put there is newer than anything the store holds, so the store restarts
+    // from it rather than overwriting a freshly loaded inventory.
+    if entry.mirror != *own {
+        log_info!("Bag at 0x{:08X}+0x{:02X} changed underneath us; reseeding.", owner, offset);
+        entry.reseed(own);
+    }
+
+    entry.sync();
+
+    // Keep the game's own bag showing what the view shows. Code that reaches it
+    // without an accessor then sees the visible slots rather than a stale copy,
+    // and this is also what makes the comparison above mean anything.
+    *own = *entry.view;
+    entry.mirror = *own;
+
+    &mut *entry.view as *mut Bag
 }
 
 /// Forgets every store.
 ///
-/// The bags a store is keyed on live in a heap object that the game frees and
-/// rebuilds, on a new game or a load. Keeping a store keyed on a stale address
-/// would hand one character's items to whatever is allocated there next.
+/// The object a store is keyed on is freed and rebuilt on a new game or a load.
+/// Keeping one keyed on a stale address would hand a character's items to
+/// whatever is allocated there next.
 pub fn forget_all() {
     if let Ok(mut registry) = REGISTRY.lock() {
         let count = registry.entries.len();
@@ -118,7 +177,7 @@ pub fn forget_all() {
     }
 }
 
-/// Scrolls every store by `rows` rows of two, and rewrites the bags.
+/// Scrolls every store by `rows` rows of two.
 ///
 /// Every store moves together rather than only the panel being looked at. The
 /// panels sit side by side, so moving both shows the same rows of each, and it
@@ -126,9 +185,8 @@ pub fn forget_all() {
 /// panel belongs to. Getting that wrong would scroll the other character's
 /// inventory, which is worse than scrolling both.
 ///
-/// The bag is written here rather than waiting for the next intercepted call,
-/// because the menu draws from the bag and nothing else would happen until the
-/// player did something that happens to be hooked.
+/// The view is refreshed here rather than waiting for the next accessor call,
+/// so a scroll is visible on the very next frame.
 ///
 /// Returns how many stores actually moved.
 pub fn scroll_all(rows: i32) -> usize {
@@ -139,41 +197,33 @@ pub fn scroll_all(rows: i32) -> usize {
     let mut moved = 0;
 
     for entry in registry.entries.iter_mut() {
-        // The bag lives in an object the game owns and can free. Reading it
-        // first turns a stale address into a skipped entry instead of a crash.
-        if crate::debug::memory::read_array::<BAG_BYTES>(entry.bag).is_none() {
-            log_debug!("Bag at 0x{:08X} is gone; skipping.", entry.bag);
-            continue;
-        }
-
-        let bag = entry.bag as *mut Bag;
-
         // Take in whatever the game wrote before moving, or the slots currently
         // on screen would be lost.
-        unsafe { entry.window.read_from(&*bag) };
+        entry.window.read_from(&entry.view);
 
         if !entry.window.scroll_rows(rows) {
             continue;
         }
 
-        unsafe { entry.window.write_into(&mut *bag) };
+        entry.window.write_into(&mut entry.view);
         moved += 1;
     }
 
     moved
 }
 
-/// Where each store's window currently sits, for logging.
-pub fn positions() -> Vec<(usize, usize, usize)> {
+/// Where each store's window sits, and what it is showing, for logging.
+pub fn positions() -> Vec<(usize, usize, usize, usize)> {
     match REGISTRY.lock() {
         Ok(registry) => registry
             .entries
             .iter()
             .map(|entry| {
                 (
-                    entry.bag,
+                    entry.owner + entry.offset,
                     entry.window.position(),
                     entry.window.store().capacity(),
+                    entry.window.store().count_empty(),
                 )
             })
             .collect(),
@@ -181,13 +231,40 @@ pub fn positions() -> Vec<(usize, usize, usize)> {
     }
 }
 
-/// Addresses of every bag a store has been created for.
-///
-/// Used by the menu probe: knowing which addresses are bags turns "dump some
-/// memory and squint" into "find where the menu keeps the bag it is showing".
-pub fn known_bags() -> Vec<usize> {
+/// The items a store holds, for logging.
+pub fn contents(index: usize) -> Vec<Item> {
     match REGISTRY.lock() {
-        Ok(registry) => registry.entries.iter().map(|entry| entry.bag).collect(),
+        Ok(registry) => registry
+            .entries
+            .get(index)
+            .map(|entry| entry.window.store().as_slice().to_vec())
+            .unwrap_or_default(),
         Err(_) => Vec::new(),
     }
 }
+
+/// Runs `action` against the store behind a view the game was given.
+///
+/// Returns `None` when the pointer is not one of ours, which happens whenever
+/// the game reached a bag by a route this mod does not intercept. The caller
+/// then falls back to the bag itself rather than guessing.
+pub fn with_view<R>(view: *const Bag, action: impl FnOnce(&mut Window) -> R) -> Option<R> {
+    let mut registry = REGISTRY.lock().ok()?;
+
+    let index = registry
+        .entries
+        .iter()
+        .position(|entry| std::ptr::eq(&*entry.view as *const Bag, view))?;
+
+    let entry = &mut registry.entries[index];
+
+    entry.window.read_from(&entry.view);
+    let result = action(&mut entry.window);
+    entry.window.write_into(&mut entry.view);
+
+    Some(result)
+}
+
+/// Slots the game can see at once, re-exported so callers do not reach past
+/// this module for it.
+pub const VISIBLE_SLOTS: usize = BAG_SIZE;
