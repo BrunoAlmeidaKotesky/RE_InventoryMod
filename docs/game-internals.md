@@ -418,3 +418,34 @@ character's bag the panel is showing. `+0x2C6` is read as a flag on the down
 path and is a candidate. Scrolling the wrong character's store would be worse
 than not scrolling at all, so this has to be answered before either hook is
 written.
+
+---
+
+## The menu object
+
+Observed by patching the cursor read and reporting what the game passed.
+
+| Offset | Meaning |
+|---|---|
+| `+0x2BC` | cursor position, `i32` |
+| `+0x2C6` | byte compared against 1 on the downward path |
+
+The cursor is a single index over the six slots. Vertical movement steps by two
+because the panel is two columns wide; horizontal movement steps by one, so odd
+values occur — 5 was observed at the bottom right.
+
+### The menu does not appear to hold a bag pointer
+
+A probe searched `0x600` bytes of the menu object for any value equal to a known
+bag address, or to the parent object holding one at `+0x20` or `+0x60`, then
+followed each plausible pointer one level and searched again. It found no path.
+
+That is a soft negative — the search stopped after 64 followed pointers — but it
+points at a likelier explanation: the panel stores which *character* it is
+showing and resolves the bag through the accessor each time it needs it. Under
+that reading, the field to look for holds one of the ids the accessor
+recognises: 1, 2, 3, 5 or 7.
+
+Resolving this matters because a scroll hook has to know which store to move.
+Scrolling the wrong character's store would show the player the other
+character's inventory shifting on its own.
