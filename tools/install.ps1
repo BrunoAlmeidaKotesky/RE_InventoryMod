@@ -46,7 +46,9 @@ $manifest = [ordered]@{
 
 # --- Save backup, every time ---
 
-$saveDir = "$env:ProgramFiles(x86)\Steam\userdata"
+# Braces are required: without them PowerShell reads $env:ProgramFiles and
+# leaves a literal "(x86)" behind, and no save is ever found to back up.
+$saveDir = "${env:ProgramFiles(x86)}\Steam\userdata"
 $saves = Get-ChildItem $saveDir -Directory -ErrorAction SilentlyContinue |
     ForEach-Object { Join-Path $_.FullName '339340\remote\data0.bin' } |
     Where-Object { Test-Path $_ }
