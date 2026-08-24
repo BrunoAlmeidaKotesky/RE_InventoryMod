@@ -6,6 +6,7 @@
 pub mod accessor;
 pub mod bag;
 pub mod detour;
+pub mod panel;
 pub mod patch;
 
 use std::sync::Mutex;
@@ -116,6 +117,17 @@ pub unsafe fn install_all(addresses: &Addresses) -> Hooks {
         addresses.partner_bag,
         accessor::partner_bag_stub as unsafe extern "C" fn() as usize,
         &ACCESSOR_PROLOGUE,
+    );
+
+    // `sub esp, 8; push esi; mov esi, ecx`
+    const DRAW_PROLOGUE: [u8; 6] = [0x83, 0xEC, 0x08, 0x56, 0x8B, 0xF1];
+
+    panel::set_continue(addresses.draw_panels_continue);
+    hooks.detour(
+        "Menu::draw_panels",
+        addresses.draw_panels,
+        panel::draw_stub as unsafe extern "C" fn() as usize,
+        &DRAW_PROLOGUE,
     );
 
     hooks.detour(

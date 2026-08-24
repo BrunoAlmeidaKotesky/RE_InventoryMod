@@ -26,8 +26,10 @@ const ERROR_DEVICE_NOT_CONNECTED: u32 = 1167;
 /// Controllers XInput can report on.
 const MAX_PADS: u32 = 4;
 
-pub const BUTTON_LEFT_SHOULDER: u16 = 0x0100;
-pub const BUTTON_RIGHT_SHOULDER: u16 = 0x0200;
+/// Thumbstick clicks. The shoulder buttons are already spoken for in this
+/// game, and a scroll binding that fights an existing one is worse than none.
+pub const BUTTON_LEFT_THUMB: u16 = 0x0040;
+pub const BUTTON_RIGHT_THUMB: u16 = 0x0080;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]

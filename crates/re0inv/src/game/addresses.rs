@@ -34,6 +34,12 @@ pub struct Addresses {
     /// `__thiscall(character)` - that character's id.
     pub character_id: usize,
 
+    /// `__thiscall(menu)` - draws both inventory panels. Three instructions,
+    /// six bytes, before it touches anything.
+    pub draw_panels: usize,
+    /// The instruction after those three.
+    pub draw_panels_continue: usize,
+
 }
 
 /// `MasterRelease Jan 28 2025 16:45:59`.
@@ -48,6 +54,9 @@ const JAN_2025: Addresses = Addresses {
     played_character: 0x004E_C780,
     partner_character: 0x0096_CD30,
     character_id: 0x0052_2AF0,
+
+    draw_panels: 0x005E_7240,
+    draw_panels_continue: 0x005E_7246,
 
 };
 

@@ -12,7 +12,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::core::gamepad::{Controller, BUTTON_LEFT_SHOULDER, BUTTON_RIGHT_SHOULDER};
+use crate::core::gamepad::{Controller, BUTTON_LEFT_THUMB, BUTTON_RIGHT_THUMB};
 use crate::core::logging::log_info;
 use crate::debug::probe;
 use crate::game::inventory::BAG_SIZE;
@@ -48,7 +48,9 @@ const SCROLL_STEP: i32 = 1;
 /// `debug_keys` gates the diagnostic commands. Scrolling is a feature and is
 /// always available; the probe is a tool and is not.
 pub fn run(ini: PathBuf, debug_keys: bool) {
-    log_info!("Inventory scrolling: Page Up and Page Down, or the shoulder buttons.");
+    log_info!(
+        "Inventory scrolling: Page Up and Page Down, or clicking the left and right sticks."
+    );
     if debug_keys {
         log_info!("Debug keys: F8 remove hooks, F9 scan, F10 narrow, F11 inspect, F12 memory map.");
     }
@@ -74,10 +76,10 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
             let pressed = buttons & !pad_was_down;
             pad_was_down = buttons;
 
-            if pressed & BUTTON_LEFT_SHOULDER != 0 {
+            if pressed & BUTTON_LEFT_THUMB != 0 {
                 scroll(-SCROLL_STEP);
             }
-            if pressed & BUTTON_RIGHT_SHOULDER != 0 {
+            if pressed & BUTTON_RIGHT_THUMB != 0 {
                 scroll(SCROLL_STEP);
             }
         }
@@ -108,6 +110,18 @@ fn scroll(rows: i32) {
     if registry::scroll_all(rows) == 0 {
         log_info!("Nothing to scroll.");
         return;
+    }
+
+    // The panel is built when the inventory opens, not redrawn each frame, so
+    // a scroll only shows after closing and reopening. Reporting what is known
+    // about the drawing is what a fix for that will be built on.
+    match crate::hook::panel::menu() {
+        Some(menu) => log_info!(
+            "Menu 0x{:08X}, drawn {} time(s) so far.",
+            menu,
+            crate::hook::panel::draw_count()
+        ),
+        None => log_info!("The panel has not been drawn yet."),
     }
 
     for (bag, position, capacity, empty) in registry::positions() {
