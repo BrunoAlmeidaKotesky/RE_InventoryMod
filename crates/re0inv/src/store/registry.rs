@@ -298,3 +298,30 @@ pub fn with_view<R>(view: *const Bag, action: impl FnOnce(&mut Window) -> R) -> 
 /// Slots the game can see at once, re-exported so callers do not reach past
 /// this module for it.
 pub const VISIBLE_SLOTS: usize = BAG_SIZE;
+
+/// Sends every window back to the first slot.
+///
+/// Used to wrap around at the end of the list. Scrolling only downwards keeps
+/// the binding out of the way of what the game already does with "up" on the
+/// top row, which is to move to the tabs above the panel.
+pub fn rewind_all() -> usize {
+    let Ok(mut registry) = REGISTRY.lock() else {
+        return 0;
+    };
+
+    let mut moved = 0;
+
+    for entry in registry.entries.iter_mut() {
+        entry.window.read_from(&entry.view);
+
+        if entry.window.position() == 0 {
+            continue;
+        }
+
+        entry.window.reset();
+        entry.window.write_into(&mut entry.view);
+        moved += 1;
+    }
+
+    moved
+}

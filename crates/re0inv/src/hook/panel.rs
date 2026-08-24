@@ -12,7 +12,7 @@
 //! Nothing here changes behaviour. The original instructions are re-executed
 //! and control goes straight back.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::core::logging::{log_debug, log_info};
 
@@ -31,8 +31,65 @@ static MENU: AtomicUsize = AtomicUsize::new(0);
 /// Where the trampoline hands control back, filled in at install time.
 static CONTINUE: AtomicUsize = AtomicUsize::new(0);
 
+/// Entry point of the drawing function, so it can be called deliberately.
+static DRAW: AtomicUsize = AtomicUsize::new(0);
+
+/// Set when the panel is showing something out of date.
+static NEEDS_REDRAW: AtomicBool = AtomicBool::new(false);
+
+/// Guards against redrawing from inside a redraw. The drawing function asks for
+/// the bags, and answering that is where the redraw is triggered from.
+static REDRAWING: AtomicBool = AtomicBool::new(false);
+
 pub fn set_continue(address: usize) {
     CONTINUE.store(address, Ordering::Relaxed);
+}
+
+pub fn set_draw(address: usize) {
+    DRAW.store(address, Ordering::Relaxed);
+}
+
+/// Says the panel is out of date.
+///
+/// The item descriptions come off the bag every frame and update on their own,
+/// but the icons are built once when the inventory opens. So changing what the
+/// bag holds is not enough on its own: the drawing has to be asked to run
+/// again.
+pub fn request_redraw() {
+    NEEDS_REDRAW.store(true, Ordering::Relaxed);
+}
+
+/// Redraws the panel if it was asked for, and if that is safe here.
+///
+/// Called from the bag accessor, which the game reaches on its own thread while
+/// a frame is in progress. Doing it from the mod's input thread instead would
+/// mean drawing while the game is halfway through drawing.
+///
+/// # Safety
+/// The menu object must still be alive, and the caller must hold no lock the
+/// drawing path will want: it asks for the bags, which comes straight back
+/// through this mod.
+pub unsafe fn redraw_if_requested() {
+    if !NEEDS_REDRAW.swap(false, Ordering::Relaxed) {
+        return;
+    }
+
+    let Some(menu) = menu() else { return };
+    let draw = DRAW.load(Ordering::Relaxed);
+
+    if draw == 0 {
+        return;
+    }
+
+    // The drawing function asks for a bag, which lands back here. Without this
+    // the first redraw would ask for another, forever.
+    if REDRAWING.swap(true, Ordering::Relaxed) {
+        return;
+    }
+
+    crate::game::call::thiscall0(draw, menu);
+
+    REDRAWING.store(false, Ordering::Relaxed);
 }
 
 /// Cursor position within the panel, 0 to 5. Two columns, so a row is two.

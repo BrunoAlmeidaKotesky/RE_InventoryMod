@@ -122,6 +122,10 @@ fn resolve(owner: usize, character_getter: usize) -> usize {
         view as usize
     });
 
+    // The lock the store needs is released by now, and this runs on the game's
+    // own thread mid-frame, which is the only safe place to ask for a redraw.
+    unsafe { crate::hook::panel::redraw_if_requested() };
+
     // A panic must not unwind into the game. Null is what the original returns
     // for an unknown character, and every caller already handles it.
     result.unwrap_or_else(|_| {

@@ -123,6 +123,7 @@ pub unsafe fn install_all(addresses: &Addresses) -> Hooks {
     const DRAW_PROLOGUE: [u8; 6] = [0x83, 0xEC, 0x08, 0x56, 0x8B, 0xF1];
 
     panel::set_continue(addresses.draw_panels_continue);
+    panel::set_draw(addresses.draw_panels);
     hooks.detour(
         "Menu::draw_panels",
         addresses.draw_panels,

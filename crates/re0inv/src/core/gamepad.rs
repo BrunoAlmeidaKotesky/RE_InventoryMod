@@ -28,8 +28,8 @@ const MAX_PADS: u32 = 4;
 
 /// Thumbstick clicks. The shoulder buttons are already spoken for in this
 /// game, and a scroll binding that fights an existing one is worse than none.
-/// Directions on the d-pad.
-pub const BUTTON_DPAD_UP: u16 = 0x0001;
+/// Down on the d-pad. Up is deliberately not used: the game already moves to
+/// the tabs above the panel when the top row is pressed against.
 pub const BUTTON_DPAD_DOWN: u16 = 0x0002;
 
 #[repr(C)]

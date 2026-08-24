@@ -2,7 +2,11 @@
 //!
 //! The panel shows six slots and the store holds more. The wanted behaviour is
 //! the obvious one: with the selection on the bottom row, pressing down brings
-//! the next rows into view instead of doing nothing, and the same upwards.
+//! the next rows into view instead of doing nothing.
+//!
+//! Only downwards. Pressing up on the top row already moves to the tabs above
+//! the panel, and taking that over would break something the player uses. The
+//! list wraps instead, so everything is reachable by carrying on down.
 //!
 //! The game's own cursor code refuses the move at the edge, and several
 //! attempts at intercepting that refusal hooked instructions it never reaches.
@@ -17,7 +21,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::core::gamepad::{Controller, BUTTON_DPAD_DOWN, BUTTON_DPAD_UP};
+use crate::core::gamepad::{Controller, BUTTON_DPAD_DOWN};
 use crate::core::logging::{log_debug, log_info};
 use crate::debug::probe;
 use crate::game::inventory::BAG_SIZE;
@@ -25,9 +29,7 @@ use crate::hook::panel;
 use crate::store::registry;
 use crate::win32::{GetAsyncKeyState, KEY_PRESSED};
 
-const VK_UP: i32 = 0x26;
 const VK_DOWN: i32 = 0x28;
-const VK_W: i32 = 0x57;
 const VK_S: i32 = 0x53;
 
 const VK_PAGE_UP: i32 = 0x21;
@@ -66,8 +68,8 @@ const NAVIGATION_WINDOW: Duration = Duration::from_secs(5);
 const SCROLL_STEP: i32 = 1;
 
 pub fn run(ini: PathBuf, debug_keys: bool) {
-    log_info!("Inventory scrolling: press against the top or bottom row of the panel.");
-    log_info!("Page Up and Page Down scroll it directly.");
+    log_info!("Inventory scrolling: press down on the bottom row; it wraps at the end.");
+    log_info!("Page Up and Page Down also scroll it directly.");
     if debug_keys {
         log_info!("Debug keys: F8 remove hooks, F9 scan, F10 narrow, F11 inspect, F12 memory map.");
     }
@@ -75,8 +77,8 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
     let controller = Controller::load();
 
     let mut command_was_down = [false; COMMAND_KEYS.len()];
-    let mut up_was_down = false;
     let mut down_was_down = false;
+    let mut pad_seen = false;
 
     let mut last_cursor: Option<i32> = None;
     let mut last_moved = Instant::now();
@@ -113,89 +115,81 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
             last_phase = phase;
         }
 
-        let up = holding_up(&controller);
-        let down = holding_down(&controller);
+        let down = holding_down(&controller, &mut pad_seen);
 
-        if up && !up_was_down {
-            try_edge_scroll(cursor, last_moved, Direction::Up);
-        }
         if down && !down_was_down {
-            try_edge_scroll(cursor, last_moved, Direction::Down);
+            try_edge_scroll(cursor, last_moved);
         }
 
-        up_was_down = up;
         down_was_down = down;
 
         std::thread::sleep(POLL_INTERVAL);
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Direction {
-    Up,
-    Down,
-}
-
-/// Scrolls when the selection is pressed against the edge it cannot pass.
+/// Scrolls when the selection is pressed against the bottom row.
 ///
-/// The selection is then moved a row the other way, so it stays on the same
-/// item rather than jumping to a different one. That write is also what the
-/// game does when the cursor moves normally, which is the best chance of the
-/// panel noticing that its contents changed.
-fn try_edge_scroll(cursor: Option<i32>, last_moved: Instant, direction: Direction) {
+/// Only downwards. Pressing up on the top row already does something in this
+/// game — it moves to the tabs above the panel — and a binding that fights an
+/// existing one is worse than none. Reaching earlier slots is done by carrying
+/// on down, which wraps around at the end.
+fn try_edge_scroll(cursor: Option<i32>, last_moved: Instant) {
     let Some(cursor) = cursor else { return };
 
     if last_moved.elapsed() > NAVIGATION_WINDOW {
         return;
     }
 
-    let columns = panel::COLUMNS;
-    let at_edge = match direction {
-        Direction::Up => cursor < columns,
-        Direction::Down => cursor >= BAG_SIZE as i32 - columns,
-    };
-
-    if !at_edge {
+    if cursor < BAG_SIZE as i32 - panel::COLUMNS {
         return;
     }
 
-    let rows = match direction {
-        Direction::Up => -SCROLL_STEP,
-        Direction::Down => SCROLL_STEP,
-    };
+    if registry::scroll_all(SCROLL_STEP) == 0 {
+        // Already at the end of the store, so start over from the top.
+        if registry::rewind_all() == 0 {
+            return;
+        }
 
-    if registry::scroll_all(rows) == 0 {
+        log_info!("Wrapped back to the first slot.");
+        panel::request_redraw();
+        report();
         return;
     }
 
-    // The contents moved by a row under the selection, so move the selection
-    // the other way to keep it on the same item.
-    let followed = cursor - rows * columns;
+    // The contents moved up by a row under the selection, so move the selection
+    // down by one to keep it on the same item.
+    let followed = cursor - panel::COLUMNS;
     if (0..BAG_SIZE as i32).contains(&followed) {
         unsafe { panel::set_cursor(followed) };
     }
 
+    panel::request_redraw();
     report();
 }
 
-fn holding_up(controller: &Option<Controller>) -> bool {
-    if pressed(VK_UP) || pressed(VK_W) {
-        return true;
-    }
-
-    controller.as_ref().is_some_and(|pad| {
-        pad.buttons() & BUTTON_DPAD_UP != 0 || pad.left_stick_y() > STICK_THRESHOLD
-    })
-}
-
-fn holding_down(controller: &Option<Controller>) -> bool {
+/// Whether "down" is being asked for, by keyboard or controller.
+///
+/// `pad_seen` records the first time a controller reports anything at all, so
+/// a controller that is connected but silent can be told apart from one that is
+/// not being read correctly.
+fn holding_down(controller: &Option<Controller>, pad_seen: &mut bool) -> bool {
     if pressed(VK_DOWN) || pressed(VK_S) {
         return true;
     }
 
-    controller.as_ref().is_some_and(|pad| {
-        pad.buttons() & BUTTON_DPAD_DOWN != 0 || pad.left_stick_y() < -STICK_THRESHOLD
-    })
+    let Some(pad) = controller.as_ref() else {
+        return false;
+    };
+
+    let buttons = pad.buttons();
+    let stick = pad.left_stick_y();
+
+    if !*pad_seen && (buttons != 0 || stick.unsigned_abs() > STICK_THRESHOLD as u16) {
+        *pad_seen = true;
+        log_info!("Controller reporting: buttons 0x{buttons:04X}, stick {stick}.");
+    }
+
+    buttons & BUTTON_DPAD_DOWN != 0 || stick < -STICK_THRESHOLD
 }
 
 fn pressed(key: i32) -> bool {
