@@ -193,7 +193,7 @@ fn resolve(owner: usize, character_getter: usize) -> usize {
 fn bag_offset(owner: usize, character_getter: usize, addresses: &Addresses) -> Option<usize> {
     // Safety: the global is written by the game and read the same way here as
     // in the code being replaced.
-    let holder = unsafe { *(addresses.character_holder as *const usize) };
+    let holder = unsafe { (addresses.character_holder as *const usize).read_volatile() };
     if holder == 0 {
         return None;
     }

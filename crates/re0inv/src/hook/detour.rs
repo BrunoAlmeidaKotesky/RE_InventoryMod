@@ -1,6 +1,6 @@
 //! Redirecting a game function to one of ours.
 //!
-//! A detour writes a five-yte relative jump over the start of the target. From
+//! A detour writes a five-byte relative jump over the start of the target. From
 //! then on, calling the game function lands in the replacement instead.
 //!
 //! This only works for functions we replace outright. Calling the original from
@@ -84,11 +84,14 @@ impl Detour {
             return None;
         }
 
-        let found = std::slice::from_raw_parts(target as *const u8, expected.len());
+        let found: Vec<u8> = (0..expected.len())
+            .map(|offset| ((target + offset) as *const u8).read_volatile())
+            .collect();
+
         if found != expected {
             log_error!(
                 "{name}: 0x{target:08X} holds {} but {} was expected. Not patching.",
-                hex(found),
+                hex(&found),
                 hex(expected)
             );
             return None;

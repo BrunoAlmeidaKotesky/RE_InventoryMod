@@ -71,10 +71,18 @@ impl Patch {
     }
 }
 
+/// Copies bytes out of the game's code.
+///
+/// A byte-at-a-time volatile copy rather than a slice. A Rust slice over code
+/// this mod is about to overwrite, and that the processor is executing, is a
+/// promise that nothing else touches it — which is exactly false here.
+///
 /// # Safety
 /// `address` must be readable for `len` bytes.
 unsafe fn read_bytes(address: usize, len: usize) -> Vec<u8> {
-    std::slice::from_raw_parts(address as *const u8, len).to_vec()
+    (0..len)
+        .map(|offset| ((address + offset) as *const u8).read_volatile())
+        .collect()
 }
 
 /// Makes the page writable, writes, and restores the original protection.

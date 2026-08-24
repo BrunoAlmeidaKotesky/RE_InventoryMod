@@ -113,21 +113,17 @@ impl Entry {
     }
 }
 
-// Safety: the pointer is a plain allocation this entry owns and frees, and
-// every access goes through the volatile helpers below. Sending it between
-// threads is no less safe than sending the `Box` it replaced; the reason it is
-// a raw pointer is aliasing with the game, not thread ownership.
+// Safety: the pointer is a plain allocation reached only through the volatile
+// helpers below, and it is never freed. The reason it is a raw pointer is
+// aliasing with the game, not thread ownership.
 unsafe impl Send for Entry {}
 
-impl Drop for Entry {
-    fn drop(&mut self) {
-        // Safety: allocated by `Box::into_raw` in `view_for` and not handed to
-        // anything that outlives this entry. The game may still hold the
-        // address, which is why entries are only dropped when the object they
-        // belong to is already gone.
-        unsafe { drop(Box::from_raw(self.view)) };
-    }
-}
+// The view allocation is deliberately never freed.
+//
+// The game is handed its address and keeps it for as long as it likes, with no
+// way for this mod to know when the last copy is gone. Freeing on drop would
+// turn every stale copy into a use-after-free, and there are at most a handful
+// of these for the life of the process. Leaking is the cheaper mistake.
 
 /// Copies a bag out of memory something else may be writing.
 ///
@@ -260,6 +256,9 @@ pub unsafe fn view_for(owner: usize, offset: usize) -> *mut Bag {
 /// The object a store is keyed on is freed and rebuilt on a new game or a load.
 /// Keeping one keyed on a stale address would hand a character's items to
 /// whatever is allocated there next.
+///
+/// The views themselves are not freed, and cannot be: the game holds their
+/// addresses. Dropping the entries only drops this mod's claim on them.
 pub fn forget_all() {
     if let Ok(mut registry) = REGISTRY.lock() {
         let count = registry.entries.len();

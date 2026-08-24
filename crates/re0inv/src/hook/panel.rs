@@ -13,6 +13,8 @@
 //! and control goes straight back.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use crate::core::logging::{log_debug, log_info};
 
@@ -34,8 +36,8 @@ static CONTINUE: AtomicUsize = AtomicUsize::new(0);
 /// Entry point of the drawing function, so it can be called deliberately.
 static DRAW: AtomicUsize = AtomicUsize::new(0);
 
-/// Set when the panel is showing something out of date.
-static NEEDS_REDRAW: AtomicBool = AtomicBool::new(false);
+/// When the panel was last reported out of date.
+static REQUESTED_AT: Mutex<Option<Instant>> = Mutex::new(None);
 
 /// Guards against redrawing from inside a redraw. The drawing function asks for
 /// the bags, and answering that is where the redraw is triggered from.
@@ -49,6 +51,16 @@ pub fn set_draw(address: usize) {
     DRAW.store(address, Ordering::Relaxed);
 }
 
+/// How long a redraw request stays worth honouring.
+///
+/// The request is made from the mod's own thread and honoured from the game's,
+/// on the next accessor call. Those calls happen every frame whether or not the
+/// inventory is open, so a request left standing would eventually be honoured
+/// against a menu the player has already closed. Scrolling and the next frame
+/// are milliseconds apart; anything older than this did not get its chance and
+/// is not going to.
+const REDRAW_DEADLINE: Duration = Duration::from_millis(500);
+
 /// Says the panel is out of date.
 ///
 /// The item descriptions come off the bag every frame and update on their own,
@@ -56,7 +68,21 @@ pub fn set_draw(address: usize) {
 /// bag holds is not enough on its own: the drawing has to be asked to run
 /// again.
 pub fn request_redraw() {
-    NEEDS_REDRAW.store(true, Ordering::Relaxed);
+    if let Ok(mut requested) = REQUESTED_AT.lock() {
+        *requested = Some(Instant::now());
+    }
+}
+
+/// Takes the pending request, if there is one and it is still fresh.
+fn take_request() -> bool {
+    let Ok(mut requested) = REQUESTED_AT.lock() else {
+        return false;
+    };
+
+    match requested.take() {
+        Some(at) => at.elapsed() < REDRAW_DEADLINE,
+        None => false,
+    }
 }
 
 /// Redraws the panel if it was asked for, and if that is safe here.
@@ -70,7 +96,7 @@ pub fn request_redraw() {
 /// drawing path will want: it asks for the bags, which comes straight back
 /// through this mod.
 pub unsafe fn redraw_if_requested() {
-    if !NEEDS_REDRAW.swap(false, Ordering::Relaxed) {
+    if !take_request() {
         return;
     }
 
@@ -103,6 +129,9 @@ const OFFSET_PHASE: usize = 0x294;
 /// Slots across the panel. A vertical move is a step of this.
 pub const COLUMNS: i32 = 2;
 
+/// One past the highest cursor value the game uses.
+const CURSOR_LIMIT: i32 = 6;
+
 /// The menu object, if the inventory has been drawn at least once.
 pub fn menu() -> Option<usize> {
     match MENU.load(Ordering::Relaxed) {
@@ -134,7 +163,13 @@ pub fn cursor() -> Option<i32> {
 pub unsafe fn set_cursor(value: i32) -> bool {
     let Some(menu) = menu() else { return false };
 
-    if crate::debug::memory::read_i32(menu + OFFSET_CURSOR).is_none() {
+    // Reading first proves the page is still mapped, and the range proves it
+    // still looks like a cursor rather than whatever was allocated over a menu
+    // that has been closed.
+    let plausible = crate::debug::memory::read_i32(menu + OFFSET_CURSOR)
+        .is_some_and(|current| (0..CURSOR_LIMIT).contains(&current));
+
+    if !plausible {
         return false;
     }
 
