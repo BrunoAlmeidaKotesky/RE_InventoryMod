@@ -48,6 +48,9 @@ struct Entry {
     mirror: Bag,
 
     window: Window,
+
+    /// Last state reported to the log, so only changes are printed.
+    last_reported: String,
 }
 
 impl Entry {
@@ -63,6 +66,30 @@ impl Entry {
         self.window = Window::new(self.window.store().capacity());
         self.window.read_from(source);
         *self.view = *source;
+    }
+
+    /// Reports what the game is about to be shown, when it changes.
+    ///
+    /// The accessor runs once per drawn frame, so this only speaks up when the
+    /// answer is different from last time. Without that it would be thousands of
+    /// identical lines; with it, every line is a change worth explaining.
+    fn report(&mut self) {
+        let ids: Vec<i32> = self.view.items.iter().map(|item| item.id).collect();
+        let fingerprint = format!("{}:{:?}", self.window.position(), ids);
+
+        if self.last_reported == fingerprint {
+            return;
+        }
+        self.last_reported = fingerprint;
+
+        log_info!(
+            "View 0x{:08X}+0x{:02X} at slot {}: {:?}  equipped {}",
+            self.owner,
+            self.offset,
+            self.window.position() + 1,
+            ids,
+            self.view.equipped_index
+        );
     }
 }
 
@@ -137,6 +164,7 @@ pub unsafe fn view_for(owner: usize, offset: usize) -> *mut Bag {
                 view: Box::new(*own),
                 mirror: *own,
                 window,
+                last_reported: String::new(),
             });
 
             registry.entries.len() - 1
@@ -160,6 +188,8 @@ pub unsafe fn view_for(owner: usize, offset: usize) -> *mut Bag {
     // and this is also what makes the comparison above mean anything.
     *own = *entry.view;
     entry.mirror = *own;
+
+    entry.report();
 
     &mut *entry.view as *mut Bag
 }
