@@ -26,6 +26,7 @@ static INSTALLED: Mutex<Option<doors::Doors>> = Mutex::new(None);
 pub unsafe fn install_all(addresses: &Addresses, config: &Config) {
     if config.item_box.enabled {
         item_box::enable(config.item_box.slots);
+        watch_typewriter(addresses);
     }
 
     if !config.doors.skip {
@@ -51,5 +52,36 @@ pub unsafe fn remove_all() {
             None => log_info!("No features are installed."),
         },
         Err(_) => log_warn!("Feature registry is poisoned; refusing to touch the game's code."),
+    }
+}
+
+/// Watches for the player being at a typewriter, which is the only place the
+/// box may be opened.
+///
+/// # Safety
+/// The address must belong to the build actually running.
+unsafe fn watch_typewriter(addresses: &Addresses) {
+    // `sub esp, 0x54; push esi; push edi` — exactly five bytes, so the jump
+    // covers the three instructions with nothing left over to pad.
+    const PROLOGUE: [u8; 5] = [0x83, 0xEC, 0x54, 0x56, 0x57];
+
+    item_box::set_typewriter_continue(addresses.typewriter_continue);
+
+    let Some(jump) = crate::hook::detour::jump_bytes(
+        addresses.typewriter,
+        item_box::typewriter_stub as unsafe extern "C" fn() as usize,
+    ) else {
+        log_warn!("Typewriter watcher is out of jump range.");
+        return;
+    };
+
+    match crate::hook::patch::Patch::write_expecting(addresses.typewriter, &PROLOGUE, &jump) {
+        Some(patch) => {
+            // Leaked on purpose, like the door patches: nothing removes these
+            // yet, and the bytes they replaced live inside them.
+            std::mem::forget(patch);
+            log_info!("Item box will be reachable at typewriters.");
+        }
+        None => log_warn!("Could not watch for typewriters; the box will not open."),
     }
 }

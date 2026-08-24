@@ -54,6 +54,12 @@ pub struct Addresses {
     /// The re-arm that puts a second back when the room change is not done.
     pub door_duration_rearm: usize,
 
+    /// The routine that runs while the player is at a typewriter. Three
+    /// instructions, five bytes, before it touches anything.
+    pub typewriter: usize,
+    /// The instruction after those three.
+    pub typewriter_continue: usize,
+
     /// `__thiscall(transition)` - the per-frame update of the door transition.
     /// Three instructions, twelve bytes, before it touches anything.
     pub door_update: usize,
@@ -89,6 +95,9 @@ const JAN_2025: Addresses = Addresses {
     door_duration_tail: 0x0055_2A21,
     door_duration_modelless: 0x0055_2A46,
     door_duration_rearm: 0x0055_255C,
+
+    typewriter: 0x0057_A9D0,
+    typewriter_continue: 0x0057_A9D5,
 
     door_update: 0x0055_2300,
     door_update_continue: 0x0055_230C,
