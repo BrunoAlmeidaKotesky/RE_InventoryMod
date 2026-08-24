@@ -133,7 +133,19 @@ pub unsafe fn redraw_if_requested() {
 }
 
 /// Cursor position within the panel, 0 to 5. Two columns, so a row is two.
-const OFFSET_CURSOR: usize = 0x2BC;
+///
+/// Found by differential scan, not by guesswork: `0x2BC` was tried first and
+/// read zero for an entire session of navigating the panel. This one was the
+/// first field in the object to move repeatedly between values in the range a
+/// six-slot selection can hold, and it moved from the first menu open onwards.
+///
+/// The neighbours at `0x2AC`, `0x2B0` and `0x2BC` behave similarly and are
+/// logged alongside it under the probe switch, so a wrong pick here shows up in
+/// one run rather than in another round of guessing.
+const OFFSET_CURSOR: usize = 0x2B4;
+
+/// The fields that looked like a selection, for telling them apart.
+pub const CURSOR_CANDIDATES: [usize; 4] = [0x2AC, 0x2B0, 0x2B4, 0x2BC];
 /// Counter the menu bumps as it moves between states.
 const OFFSET_PHASE: usize = 0x294;
 
@@ -194,6 +206,12 @@ pub unsafe fn set_cursor(value: i32) -> bool {
 pub fn phase() -> Option<i32> {
     let menu = menu()?;
     crate::debug::memory::read_i32(menu + OFFSET_PHASE)
+}
+
+/// All four selection candidates at once, for identifying which is which.
+pub fn cursor_candidates() -> Option<[Option<i32>; 4]> {
+    let menu = menu()?;
+    Some(CURSOR_CANDIDATES.map(|at| crate::debug::memory::read_i32(menu + at)))
 }
 
 /// The phase the menu rests at while the inventory is not on screen.

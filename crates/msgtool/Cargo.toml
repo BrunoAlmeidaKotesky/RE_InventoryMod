@@ -1,0 +1,17 @@
+[package]
+name = "msgtool"
+version = "0.1.0"
+edition = "2021"
+description = "Reads and rebuilds the game's message archives"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "re0msg"
+path = "src/main.rs"
+
+[dependencies]
+# The archive stores every entry zlib-compressed, so rebuilding one means
+# decompressing and compressing again. Nothing else in the format needs a
+# library.
+flate2 = "1"

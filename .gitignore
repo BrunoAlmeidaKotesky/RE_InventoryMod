@@ -28,3 +28,6 @@ Cargo.lock
 # Ficam fora do repositorio publico: contem caminhos da maquina local,
 # raciocinio em andamento e os documentos de aprendizado em portugues.
 dev-notes/
+
+# Third-party reference, read only, never distributed.
+reference/

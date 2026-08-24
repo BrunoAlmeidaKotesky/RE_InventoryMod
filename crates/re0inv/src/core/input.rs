@@ -99,12 +99,19 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
 
         let cursor = panel::cursor();
         if cursor != last_cursor {
-            log_debug!("Selection {last_cursor:?} -> {cursor:?}.");
             last_cursor = cursor;
+
+            // All four candidates together, so a wrong pick is obvious from one
+            // session rather than needing another round of guessing.
+            if debug_keys {
+                log_debug!(
+                    "Selection {cursor:?}; candidates {:?} at {:X?}.",
+                    panel::cursor_candidates(),
+                    panel::CURSOR_CANDIDATES
+                );
+            }
         }
 
-        // Hunting for the field the selection really lives in. The one being
-        // read above never moved off zero across a whole session.
         if debug_keys {
             crate::debug::selection::sample();
         }
