@@ -196,6 +196,19 @@ pub fn phase() -> Option<i32> {
     crate::debug::memory::read_i32(menu + OFFSET_PHASE)
 }
 
+/// The phase the menu rests at while the inventory is not on screen.
+const PHASE_CLOSED: i32 = 0;
+
+/// Whether the inventory screen is up.
+///
+/// Every open and close logged so far runs `0 -> 1 -> 2`, stays at two or above
+/// for as long as the screen is up, then `-> 3 -> 0`. So anything but zero means
+/// open, and that is a far better answer than the one this replaced: the
+/// selection had not moved for a while, which at a typewriter is always true.
+pub fn is_open() -> bool {
+    phase().is_some_and(|phase| phase != PHASE_CLOSED)
+}
+
 /// How many times the panel has been drawn.
 pub fn draw_count() -> usize {
     DRAWS.load(Ordering::Relaxed)

@@ -68,9 +68,12 @@ pub unsafe extern "C" fn player_bag_stub() {
 #[unsafe(naked)]
 pub unsafe extern "C" fn partner_bag_stub() {
     core::arch::naked_asm!(
+        // The return address, so the handler can tell a question asked by the
+        // inventory screen from one asked out in the world.
+        "push dword ptr [esp]",
         "push ecx",
         "call {handler}",
-        "add esp, 4",
+        "add esp, 8",
         "ret",
         handler = sym partner_bag,
     )
@@ -137,11 +140,16 @@ extern "C" fn player_bag(owner: usize) -> usize {
     resolve(owner, addresses.played_character)
 }
 
-extern "C" fn partner_bag(owner: usize) -> usize {
-    // The item box takes this panel over while it is showing. Only ever while
-    // the inventory is open: this accessor answers questions out in the world
-    // too, and those must be answered about the partner, not about storage.
-    if crate::feature::item_box::is_open() {
+extern "C" fn partner_bag(owner: usize, called_from: usize) -> usize {
+    // The item box takes this panel over while it is showing, but only for the
+    // inventory screen. This same accessor answers questions out in the world —
+    // "does the partner have this key" among them — and those must be answered
+    // about the partner, whatever the panel happens to be displaying.
+    //
+    // Deciding by who called is exact. Deciding by a timer was not: at a
+    // typewriter the cursor never moves, so an idle timer closed the box the
+    // instant it opened.
+    if crate::feature::item_box::is_open() && is_menu_code(called_from) {
         let view = crate::feature::item_box::view();
         if !view.is_null() {
             unsafe { crate::hook::panel::redraw_if_requested() };
@@ -236,4 +244,14 @@ fn offset_for_id(id: i32) -> Option<usize> {
         return Some(SECOND_BAG_OFFSET);
     }
     None
+}
+
+/// Whether an address belongs to the inventory screen's code.
+///
+/// The menu lives in one stretch: its state machine at `0x005E1D10`, the panel
+/// drawing at `0x005E7240`, and the screen's setup below both. Nothing else the
+/// mod cares about sits in that range.
+fn is_menu_code(address: usize) -> bool {
+    const MENU_CODE: std::ops::Range<usize> = 0x005D_0000..0x005F_0000;
+    MENU_CODE.contains(&address)
 }

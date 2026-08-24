@@ -193,6 +193,46 @@ unsafe fn apply_timer(addresses: &Addresses, patches: &mut Vec<Patch>) {
         "door duration re-arm",
         Patch::write_expecting(addresses.door_duration_rearm, &SET_ONE_SECOND, &rearm),
     );
+
+    apply_motion_wait(addresses, patches);
+}
+
+/// Stops state five from waiting for the door's motion to play out.
+///
+/// The timeline the watcher printed put every state before this one under a
+/// tenth of a second, and this one at a quarter of a second and counting. It is
+/// where the time that is left actually goes.
+///
+/// ```asm
+/// mov  ecx, edi
+/// call 0x00551C70     ; has the door's motion finished?
+/// test al, al
+/// je   0x00552702     ; no - come back next frame
+/// ```
+///
+/// The `je` becomes six `nop`s, so the answer stops mattering and the state
+/// carries on the first time it is reached.
+///
+/// This is safe for the same reason the timer was: the room change is a
+/// separate question, asked in state four through `[this+0x28]`, and that
+/// handshake is untouched. What is being skipped here is only the playback of
+/// the door model, which is the animation this feature exists to remove.
+///
+/// The flags `test al, al` sets die with the jump; the instruction after it
+/// reads `[edi+0x3C]` and no flag survives that far.
+unsafe fn apply_motion_wait(addresses: &Addresses, patches: &mut Vec<Patch>) {
+    /// `je 0x00552702`, near form.
+    const WAIT_FOR_MOTION: [u8; 6] = [0x0F, 0x84, 0xCC, 0x00, 0x00, 0x00];
+
+    push(
+        patches,
+        "wait for the door's motion",
+        Patch::write_expecting(
+            addresses.door_motion_wait,
+            &WAIT_FOR_MOTION,
+            &[NOP; WAIT_FOR_MOTION.len()],
+        ),
+    );
 }
 
 /// Shortens the four fades around the transition.

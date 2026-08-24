@@ -4,3 +4,4 @@
 pub mod dump;
 pub mod memory;
 pub mod probe;
+pub mod selection;

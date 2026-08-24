@@ -19,7 +19,7 @@
 //! this into the game's input handling eventually.
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::core::gamepad::{
     Controller, BUTTON_DPAD_DOWN, BUTTON_LEFT_THUMB, BUTTON_RIGHT_THUMB,
@@ -40,16 +40,18 @@ const VK_HOME: i32 = 0x24;
 const VK_PAGE_UP: i32 = 0x21;
 const VK_PAGE_DOWN: i32 = 0x22;
 
+const VK_F7: i32 = 0x76;
 const VK_F8: i32 = 0x77;
 const VK_F9: i32 = 0x78;
 const VK_F10: i32 = 0x79;
 const VK_F11: i32 = 0x7A;
 const VK_F12: i32 = 0x7B;
 
-const COMMAND_KEYS: [i32; 8] = [
+const COMMAND_KEYS: [i32; 9] = [
     VK_HOME,
     VK_PAGE_UP,
     VK_PAGE_DOWN,
+    VK_F7,
     VK_F8,
     VK_F9,
     VK_F10,
@@ -63,13 +65,6 @@ const STICK_THRESHOLD: i16 = 16_000;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(40);
 
-/// How long after the selection last moved an edge press still counts.
-///
-/// This stands in for a proper "the inventory is open" signal. To be pressing
-/// against the edge, the player had to navigate there, and navigating moves the
-/// selection. Walking around the world does not.
-const NAVIGATION_WINDOW: Duration = Duration::from_secs(5);
-
 /// One row of two slots per press.
 const SCROLL_STEP: i32 = 1;
 
@@ -78,7 +73,7 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
     log_info!("Page Up and Page Down also scroll it directly.");
     log_info!("Item box: Home, or click the left stick, while at a typewriter.");
     if debug_keys {
-        log_info!("Debug keys: F8 remove hooks, F9 scan, F10 narrow, F11 inspect, F12 memory map.");
+        log_info!("Debug keys: F7 selection scan, F8 remove hooks, F9 scan, F10 narrow, F11 inspect, F12 memory map.");
     }
 
     let controller = Controller::load();
@@ -90,7 +85,6 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
     let mut pad_seen = false;
 
     let mut last_cursor: Option<i32> = None;
-    let mut last_moved = Instant::now();
     let mut last_phase: Option<i32> = None;
 
     loop {
@@ -103,14 +97,16 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
             command_was_down[index] = down;
         }
 
-        // Watching the selection serves two purposes: it says where the cursor
-        // is, and the fact that it moved says the player is in the menu.
         let cursor = panel::cursor();
         if cursor != last_cursor {
-            if cursor.is_some() {
-                last_moved = Instant::now();
-            }
+            log_debug!("Selection {last_cursor:?} -> {cursor:?}.");
             last_cursor = cursor;
+        }
+
+        // Hunting for the field the selection really lives in. The one being
+        // read above never moved off zero across a whole session.
+        if debug_keys {
+            crate::debug::selection::sample();
         }
 
         let phase = panel::phase();
@@ -124,17 +120,12 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
             last_phase = phase;
         }
 
-        // The box borrows an accessor the game also uses out in the world, so it
-        // may only be showing while the player is actually in the menu. The
-        // same idle window that gates edge scrolling decides that here.
-        if last_moved.elapsed() > NAVIGATION_WINDOW {
-            crate::feature::item_box::close();
-        }
+        crate::feature::item_box::close_if_out_of_reach();
 
         let down = holding_down(&controller, &mut pad_seen);
 
         if down && !down_was_down {
-            try_edge_scroll(cursor, last_moved);
+            try_edge_scroll(cursor);
         }
 
         down_was_down = down;
@@ -168,12 +159,12 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
 /// game — it moves to the tabs above the panel — and a binding that fights an
 /// existing one is worse than none. Reaching earlier slots is done by carrying
 /// on down, which wraps around at the end.
-fn try_edge_scroll(cursor: Option<i32>, last_moved: Instant) {
-    let Some(cursor) = cursor else { return };
-
-    if last_moved.elapsed() > NAVIGATION_WINDOW {
+fn try_edge_scroll(cursor: Option<i32>) {
+    if !panel::is_open() {
         return;
     }
+
+    let Some(cursor) = cursor else { return };
 
     if cursor < BAG_SIZE as i32 - panel::COLUMNS {
         return;
@@ -251,6 +242,7 @@ fn dispatch_command(key: i32, ini: &Path, debug_keys: bool) {
         // Everything below is diagnostic and stays behind the config switch.
         _ if !debug_keys => {}
 
+        VK_F7 => crate::debug::selection::report(),
         VK_F8 => unsafe {
             crate::hook::remove_all_installed();
             crate::feature::remove_all();

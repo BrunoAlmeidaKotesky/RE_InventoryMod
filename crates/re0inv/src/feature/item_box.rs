@@ -117,15 +117,21 @@ pub fn toggle() -> bool {
     open
 }
 
-/// Hides the box.
+/// Puts the partner's bag back once the player walks away from the typewriter.
 ///
-/// Called whenever the inventory is not open. The accessor the box borrows
-/// answers questions outside the menu too, and those must never be answered
-/// with the box's contents.
-pub fn close() {
-    if OPEN.swap(false, Ordering::Relaxed) {
-        log_info!("Item box closed.");
+/// Not an idle timer. The first version closed the box when the selection had
+/// not moved for a while, which is exactly what happens at a typewriter: the
+/// cursor never moves there, so the box closed the instant it opened.
+///
+/// This asks the one question that actually matters — is the machine still
+/// within reach — and leaves the box alone otherwise.
+pub fn close_if_out_of_reach() {
+    if !is_open() || within_reach() {
+        return;
     }
+
+    OPEN.store(false, Ordering::Relaxed);
+    log_info!("Left the typewriter; the partner's bag is back.");
 }
 
 /// Sets the box up with room for `capacity` items.

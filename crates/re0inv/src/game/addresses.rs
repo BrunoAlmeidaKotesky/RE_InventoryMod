@@ -53,6 +53,8 @@ pub struct Addresses {
     pub door_duration_modelless: usize,
     /// The re-arm that puts a second back when the room change is not done.
     pub door_duration_rearm: usize,
+    /// State five's `je`, taken for as long as the door's motion is playing.
+    pub door_motion_wait: usize,
 
     /// The routine that runs while the player is at a typewriter. Three
     /// instructions, five bytes, before it touches anything.
@@ -95,6 +97,7 @@ const JAN_2025: Addresses = Addresses {
     door_duration_tail: 0x0055_2A21,
     door_duration_modelless: 0x0055_2A46,
     door_duration_rearm: 0x0055_255C,
+    door_motion_wait: 0x0055_2630,
 
     typewriter: 0x0057_A9D0,
     typewriter_continue: 0x0057_A9D5,
