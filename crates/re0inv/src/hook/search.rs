@@ -124,8 +124,13 @@ extern "C" fn find_item(bag: usize, item_id: i32) -> i32 {
 }
 
 /// Looks through the rest of the store by showing it to the game.
-fn sweep(bag: *mut Bag, item_id: i32, ask: impl FnMut() -> i32) -> i32 {
-    let Some(found) = registry::probe_positions(bag, ask) else {
+fn sweep(bag: *mut Bag, item_id: i32, mut ask: impl FnMut() -> i32) -> i32 {
+    // The box is storage of the same kind and is searched the same way, but it
+    // lives outside the registry, so it has to be offered the sweep too.
+    let found = registry::probe_positions(bag, &mut ask)
+        .or_else(|| crate::feature::item_box::probe_positions(bag, &mut ask));
+
+    let Some(found) = found else {
         // Either the bag is not one of ours, in which case the first answer was
         // the whole truth, or the item really is not there.
         return NOT_FOUND;

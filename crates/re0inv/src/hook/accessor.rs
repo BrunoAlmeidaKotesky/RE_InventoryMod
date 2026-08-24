@@ -93,22 +93,32 @@ pub unsafe extern "C" fn partner_bag_stub() {
 #[unsafe(naked)]
 pub unsafe extern "C" fn character_bag_stub() {
     core::arch::naked_asm!(
-        // Arguments in reverse. The id is still at [esp+4] because nothing has
-        // been pushed yet; the return address is at [esp].
-        "push dword ptr [esp + 4]",
+        // Arguments in reverse: the return address, the id, then the object.
+        // Nothing has been pushed yet, so the id is at [esp+4] and the return
+        // address at [esp]; each push shifts what follows.
+        "push dword ptr [esp]",
+        "push dword ptr [esp + 8]",
         "push ecx",
         "call {handler}",
-        "add esp, 8",
+        "add esp, 12",
         // The original is __thiscall with one stack argument, so it cleans it.
         "ret 4",
         handler = sym character_bag,
     )
 }
 
-extern "C" fn character_bag(owner: usize, character_id: i32) -> usize {
+extern "C" fn character_bag(owner: usize, character_id: i32, called_from: usize) -> usize {
     let result = std::panic::catch_unwind(|| {
         if owner == 0 || !owner.is_multiple_of(4) {
             return NO_BAG;
+        }
+
+        // The inventory screen reaches the other half through this accessor as
+        // well as through `partner_bag`, and moving an item between the halves
+        // is one of the paths that does. Answering with the partner's real bag
+        // here is what made a transfer into the box land on the partner.
+        if let Some(view) = box_for(character_id, called_from) {
+            return view;
         }
 
         let Some(offset) = offset_for_id(character_id) else {
@@ -244,6 +254,43 @@ fn offset_for_id(id: i32) -> Option<usize> {
         return Some(SECOND_BAG_OFFSET);
     }
     None
+}
+
+/// The box's view, when this call is the screen asking about the other half.
+///
+/// "The other half" is any character that is not the one being played. Asking
+/// which character that is costs two calls into the game and only happens while
+/// the box is actually showing.
+fn box_for(character_id: i32, called_from: usize) -> Option<usize> {
+    if !crate::feature::item_box::is_open() || !is_menu_code(called_from) {
+        return None;
+    }
+
+    if played_id()? == character_id {
+        return None;
+    }
+
+    let view = crate::feature::item_box::view();
+    (!view.is_null()).then_some(view as usize)
+}
+
+/// The id of the character currently being played.
+fn played_id() -> Option<i32> {
+    let addresses = addresses()?;
+
+    // Safety: the global is written by the game and read the same way here as
+    // in the code being replaced.
+    let holder = unsafe { (addresses.character_holder as *const usize).read_volatile() };
+    if holder == 0 {
+        return None;
+    }
+
+    let character = unsafe { thiscall0(addresses.played_character, holder) };
+    if character == 0 {
+        return None;
+    }
+
+    Some(unsafe { thiscall0(addresses.character_id, character) } as i32)
 }
 
 /// Whether an address belongs to the inventory screen's code.

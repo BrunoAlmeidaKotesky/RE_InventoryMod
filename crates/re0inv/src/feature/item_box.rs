@@ -184,6 +184,69 @@ pub fn view() -> *mut Bag {
     storage.view
 }
 
+/// Runs `action` against the box's window, if `view` is the box's own.
+///
+/// The box keeps its storage here rather than in the inventory registry, so
+/// everything that works off the registry — how many slots are free, where the
+/// next free one is, searching for an item — misses it and falls back to the
+/// six the game can see. Which is how a twenty-four slot box came to report
+/// itself full after six items.
+pub fn with_window<R>(view: *const Bag, action: impl FnOnce(&mut Window) -> R) -> Option<R> {
+    let mut storage = STORAGE.lock().ok()?;
+    let storage = storage.as_mut()?;
+
+    if !std::ptr::eq(storage.view as *const Bag, view) {
+        return None;
+    }
+
+    let mut bag = storage.read();
+    storage.window.read_from(&bag);
+    let result = action(&mut storage.window);
+    storage.window.write_into(&mut bag);
+    storage.write(&bag);
+
+    Some(result)
+}
+
+/// Shows the box at each window position in turn until `ask` is satisfied.
+///
+/// The same trick the inventory uses to answer "is this item in the bag" for
+/// slots outside the window, and needed here for the same reason: the game
+/// walks six slots and the box has many more.
+pub fn probe_positions(view: *const Bag, mut ask: impl FnMut() -> i32) -> Option<i32> {
+    let mut storage = STORAGE.lock().ok()?;
+    let storage = storage.as_mut()?;
+
+    if !std::ptr::eq(storage.view as *const Bag, view) {
+        return None;
+    }
+
+    let mut bag = storage.read();
+    storage.window.read_from(&bag);
+
+    let started_at = storage.window.position();
+    let candidates: Vec<usize> = storage.window.positions().collect();
+
+    for position in candidates {
+        storage.window.set_position(position);
+        storage.window.write_into(&mut bag);
+        storage.write(&bag);
+
+        let answer = ask();
+        if answer >= 0 {
+            return Some(answer);
+        }
+
+        bag = storage.read();
+    }
+
+    storage.window.set_position(started_at);
+    storage.window.write_into(&mut bag);
+    storage.write(&bag);
+
+    None
+}
+
 /// Moves the box's window by whole rows, and reports whether it moved.
 pub fn scroll(rows: i32) -> bool {
     let Ok(mut storage) = STORAGE.lock() else {

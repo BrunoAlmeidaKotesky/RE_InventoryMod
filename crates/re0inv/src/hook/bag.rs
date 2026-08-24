@@ -24,7 +24,9 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::core::logging::{log_debug, log_info, log_warn};
+use crate::feature::item_box;
 use crate::game::inventory::{Bag, BAG_SIZE};
+use crate::store::window::Window;
 use crate::store::registry;
 
 /// Calls logged per replacement before it goes quiet.
@@ -88,7 +90,13 @@ extern "C" fn count_empty(bag: *mut Bag) -> i32 {
             return 0;
         }
 
-        let empty = registry::with_view(bag, |window| window.store().count_empty() as i32)
+        let count = |window: &mut Window| window.store().count_empty() as i32;
+
+        // The box keeps its storage outside the registry, so it has to be asked
+        // separately. Without this a twenty-four slot box reports itself full
+        // after six items, because six is all the game can see of it.
+        let empty = registry::with_view(bag, count)
+            .or_else(|| item_box::with_window(bag, count))
             .unwrap_or_else(|| visible_empty_count(&*bag));
 
         if should_log(&COUNT_EMPTY_CALLS, "count_empty") {
@@ -143,7 +151,7 @@ extern "C" fn first_empty(bag: *mut Bag) -> i32 {
             return NO_EMPTY_SLOT;
         }
 
-        let found = registry::with_view(bag, |window| {
+        let seek = |window: &mut Window| {
             if let Some(slot) = window.first_visible_empty() {
                 return slot as i32;
             }
@@ -158,8 +166,11 @@ extern "C" fn first_empty(bag: *mut Bag) -> i32 {
             window
                 .visible_slot(index)
                 .map_or(NO_EMPTY_SLOT, |slot| slot as i32)
-        })
-        .unwrap_or_else(|| visible_first_empty(&*bag));
+        };
+
+        let found = registry::with_view(bag, seek)
+            .or_else(|| item_box::with_window(bag, seek))
+            .unwrap_or_else(|| visible_first_empty(&*bag));
 
         if should_log(&FIRST_EMPTY_CALLS, "first_empty") {
             log_info!(
