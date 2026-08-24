@@ -138,6 +138,17 @@ extern "C" fn player_bag(owner: usize) -> usize {
 }
 
 extern "C" fn partner_bag(owner: usize) -> usize {
+    // The item box takes this panel over while it is showing. Only ever while
+    // the inventory is open: this accessor answers questions out in the world
+    // too, and those must be answered about the partner, not about storage.
+    if crate::feature::item_box::is_open() {
+        let view = crate::feature::item_box::view();
+        if !view.is_null() {
+            unsafe { crate::hook::panel::redraw_if_requested() };
+            return view as usize;
+        }
+    }
+
     let Some(addresses) = addresses() else {
         return NO_BAG;
     };

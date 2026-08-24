@@ -19,7 +19,12 @@ param(
     [switch]$DumpText,
     [ValidateSet('off', 'error', 'warn', 'info', 'debug', 'trace')]
     [string]$LogLevel = 'info',
-    [int]$Slots = 12
+    [int]$Slots = 12,
+
+    # The optional features, off unless asked for.
+    [switch]$ItemBox,
+    [int]$BoxSlots = 24,
+    [switch]$SkipDoors
 )
 
 $ErrorActionPreference = 'Stop'
@@ -100,10 +105,16 @@ $iniPath = Join-Path $GameDir 're0inv.ini'
 if (-not (Test-Path $iniPath)) { $manifest.Created += $iniPath }
 
 $ini = Get-Content (Join-Path $repo 're0inv.ini') -Raw
-$ini = $ini -replace 'Slots=\d+', "Slots=$Slots"
-$ini = $ini -replace 'Level=\w+', "Level=$LogLevel"
-$ini = $ini -replace 'DumpText=\d', ("DumpText=" + [int][bool]$DumpText)
-$ini = $ini -replace 'Probe=\d', ("Probe=" + [int][bool]$Probe)
+
+# Anchored to the start of a line. Unanchored, "Slots=" also matches inside
+# "BoxSlots=", which silently rewrote the wrong setting.
+$ini = $ini -replace '(?m)^Slots=\d+', "Slots=$Slots"
+$ini = $ini -replace '(?m)^BoxSlots=\d+', "BoxSlots=$BoxSlots"
+$ini = $ini -replace '(?m)^Level=\w+', "Level=$LogLevel"
+$ini = $ini -replace '(?m)^DumpText=\d', ("DumpText=" + [int][bool]$DumpText)
+$ini = $ini -replace '(?m)^Probe=\d', ("Probe=" + [int][bool]$Probe)
+$ini = $ini -replace '(?m)^ItemBox=\d', ("ItemBox=" + [int][bool]$ItemBox)
+$ini = $ini -replace '(?m)^SkipDoors=\d', ("SkipDoors=" + [int][bool]$SkipDoors)
 Set-Content $iniPath -Value $ini -Encoding utf8
 Write-Host "Installed: $iniPath" -ForegroundColor Green
 

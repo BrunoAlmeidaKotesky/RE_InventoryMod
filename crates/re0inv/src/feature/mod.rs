@@ -6,6 +6,7 @@
 //! failing to install leaves the others alone.
 
 pub mod doors;
+pub mod item_box;
 
 use std::sync::Mutex;
 
@@ -23,6 +24,10 @@ static INSTALLED: Mutex<Option<doors::Doors>> = Mutex::new(None);
 /// The addresses must belong to the build actually running, and the code
 /// section must be decrypted.
 pub unsafe fn install_all(addresses: &Addresses, config: &Config) {
+    if config.item_box.enabled {
+        item_box::enable(config.item_box.slots);
+    }
+
     if !config.doors.skip {
         return;
     }

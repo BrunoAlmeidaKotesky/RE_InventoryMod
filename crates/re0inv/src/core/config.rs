@@ -12,6 +12,9 @@ use crate::game::inventory::BAG_SIZE;
 /// Slots per character when the ini says nothing. Double the stock six.
 pub const DEFAULT_SLOTS: usize = 12;
 
+/// Slots in the item box when the ini says nothing.
+pub const DEFAULT_BOX_SLOTS: usize = 24;
+
 /// Upper bound on slots. Exists to turn a typo into a warning instead of an
 /// absurd allocation.
 pub const MAX_SLOTS: usize = 32;
@@ -25,7 +28,16 @@ pub struct Config {
     /// out in rows of 2, and two-slot items break on an odd count.
     pub slots: usize,
     pub doors: DoorsConfig,
+    pub item_box: ItemBoxConfig,
     pub debug: DebugConfig,
+}
+
+/// Storage shown in place of the partner's bag.
+#[derive(Clone)]
+pub struct ItemBoxConfig {
+    pub enabled: bool,
+    /// How much the box holds. Even, for the same reason the inventory is.
+    pub slots: usize,
 }
 
 /// Skipping the animation played when walking through a door.
@@ -60,6 +72,10 @@ impl Default for Config {
             doors: DoorsConfig {
                 skip: false,
                 shorten_fades: true,
+            },
+            item_box: ItemBoxConfig {
+                enabled: false,
+                slots: DEFAULT_BOX_SLOTS,
             },
             debug: DebugConfig {
                 dump_text: false,
@@ -97,6 +113,14 @@ impl Config {
         if let Some(v) = get("path") {
             if !v.is_empty() {
                 cfg.log_path = v.to_string();
+            }
+        }
+        if let Some(v) = get("itembox") {
+            cfg.item_box.enabled = parse_bool(v, cfg.item_box.enabled);
+        }
+        if let Some(v) = get("boxslots") {
+            if let Ok(n) = v.parse::<usize>() {
+                cfg.item_box.slots = n;
             }
         }
         if let Some(v) = get("skipdoors") {

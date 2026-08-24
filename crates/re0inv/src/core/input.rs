@@ -32,6 +32,9 @@ use crate::win32::{GetAsyncKeyState, KEY_PRESSED};
 const VK_DOWN: i32 = 0x28;
 const VK_S: i32 = 0x53;
 
+/// Shows the item box in place of the partner's bag.
+const VK_HOME: i32 = 0x24;
+
 const VK_PAGE_UP: i32 = 0x21;
 const VK_PAGE_DOWN: i32 = 0x22;
 
@@ -41,7 +44,8 @@ const VK_F10: i32 = 0x79;
 const VK_F11: i32 = 0x7A;
 const VK_F12: i32 = 0x7B;
 
-const COMMAND_KEYS: [i32; 7] = [
+const COMMAND_KEYS: [i32; 8] = [
+    VK_HOME,
     VK_PAGE_UP,
     VK_PAGE_DOWN,
     VK_F8,
@@ -115,6 +119,13 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
             last_phase = phase;
         }
 
+        // The box borrows an accessor the game also uses out in the world, so it
+        // may only be showing while the player is actually in the menu. The
+        // same idle window that gates edge scrolling decides that here.
+        if last_moved.elapsed() > NAVIGATION_WINDOW {
+            crate::feature::item_box::close();
+        }
+
         let down = holding_down(&controller, &mut pad_seen);
 
         if down && !down_was_down {
@@ -144,7 +155,7 @@ fn try_edge_scroll(cursor: Option<i32>, last_moved: Instant) {
         return;
     }
 
-    if registry::scroll_all(SCROLL_STEP) == 0 {
+    if scroll_everything(SCROLL_STEP) == 0 {
         // Already at the end of the store, so start over from the top.
         if registry::rewind_all() == 0 {
             return;
@@ -199,14 +210,18 @@ fn pressed(key: i32) -> bool {
 
 fn dispatch_command(key: i32, ini: &Path, debug_keys: bool) {
     match key {
+        VK_HOME => {
+            crate::feature::item_box::toggle();
+            panel::request_redraw();
+        }
         VK_PAGE_UP => {
-            if registry::scroll_all(-SCROLL_STEP) > 0 {
+            if scroll_everything(-SCROLL_STEP) > 0 {
                 panel::request_redraw();
             }
             report();
         }
         VK_PAGE_DOWN => {
-            if registry::scroll_all(SCROLL_STEP) > 0 {
+            if scroll_everything(SCROLL_STEP) > 0 {
                 panel::request_redraw();
             }
             report();
@@ -229,6 +244,16 @@ fn dispatch_command(key: i32, ini: &Path, debug_keys: bool) {
 
 /// Reports where each window landed, and what the panel has been told.
 fn report() {
+    if let Some((position, capacity, empty)) = crate::feature::item_box::state() {
+        log_info!(
+            "Item box: showing slots {}-{} of {}, {} free.",
+            position + 1,
+            position + BAG_SIZE,
+            capacity,
+            empty
+        );
+    }
+
     for (bag, position, capacity, empty) in registry::positions() {
         log_info!(
             "Bag 0x{:08X}: showing slots {}-{} of {}, {} free.",
@@ -245,4 +270,18 @@ fn report() {
         panel::draw_count(),
         panel::cursor()
     );
+}
+
+/// Scrolls the inventories, and the box as well when it is showing.
+///
+/// Returns how many windows moved, so the caller can tell "nothing moved
+/// because everything is already at the end" from "nothing to scroll".
+fn scroll_everything(rows: i32) -> usize {
+    let mut moved = registry::scroll_all(rows);
+
+    if crate::feature::item_box::is_open() && crate::feature::item_box::scroll(rows) {
+        moved += 1;
+    }
+
+    moved
 }
