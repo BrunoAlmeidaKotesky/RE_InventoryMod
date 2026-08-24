@@ -68,6 +68,18 @@ pub const KEY_PRESSED: u16 = 0x8000;
 
 #[link(name = "kernel32")]
 extern "system" {
+    /// Changes page protection. `old` receives the previous value, which must
+    /// be restored once the write is done.
+    pub fn VirtualProtect(
+        address: *const c_void,
+        size: usize,
+        new_protect: u32,
+        old_protect: *mut u32,
+    ) -> Bool;
+
+    /// Discards anything the CPU cached from a code page that just changed.
+    pub fn FlushInstructionCache(process: Handle, address: *const c_void, size: usize) -> Bool;
+
     pub fn GetModuleHandleA(module_name: *const u8) -> Handle;
 
     pub fn GetModuleFileNameA(module: Handle, filename: *mut u8, size: u32) -> u32;
