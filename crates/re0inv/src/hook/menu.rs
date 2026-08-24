@@ -20,19 +20,34 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::core::logging::{log_debug, log_info};
+use crate::debug::memory;
+use crate::store::registry;
 
 /// Cursor position within the panel, 0 to 5.
 const OFFSET_CURSOR: usize = 0x2BC;
-/// Read as a flag on the downward path. Candidate for the panel selector.
+/// Read as a flag on the downward path.
 const OFFSET_FLAG: usize = 0x2C6;
 
-/// Region of the menu object to dump, chosen to bracket both fields above.
-const DUMP_START: usize = 0x2A0;
-const DUMP_LENGTH: usize = 0x40;
+/// How much of the menu object to search for a bag pointer.
+const SCAN_BYTES: usize = 0x600;
+
+/// How far into an object the menu points at to keep searching.
+///
+/// The menu may hold the character or the inventory owner rather than the bag
+/// itself, in which case the bag is one hop further on.
+const NESTED_SCAN_BYTES: usize = 0x200;
+
+/// How many distinct pointers to follow one level down. A bound keeps a menu
+/// full of pointers from turning one keypress into a long pause.
+const MAX_FOLLOWED: usize = 64;
+
+/// Offsets of the two bags inside their parent object. A pointer to the parent
+/// is as good as a pointer to the bag, so both are worth recognising.
+const BAG_OFFSETS: [usize; 2] = [0x20, 0x60];
 
 /// Observations logged before going quiet. Enough to cover moving around both
 /// panels a few times.
-const LOG_LIMIT: usize = 24;
+const LOG_LIMIT: usize = 12;
 
 static OBSERVATIONS: AtomicUsize = AtomicUsize::new(0);
 
@@ -126,27 +141,115 @@ extern "C" fn observe(menu: usize) {
         }
 
         // Safety: the game just used this pointer to read its own field, so the
-        // object is mapped. The dump stays inside the same object.
+        // object is mapped.
         let cursor = unsafe { *((menu + OFFSET_CURSOR) as *const i32) };
         let flag = unsafe { *((menu + OFFSET_FLAG) as *const u8) };
 
-        log_info!(
-            "menu 0x{:08X}  cursor {}  +0x2C6 {}",
-            menu,
-            cursor,
-            flag
-        );
+        log_info!("menu 0x{menu:08X}  cursor {cursor}  +0x2C6 {flag}");
 
-        for row in 0..(DUMP_LENGTH / 16) {
-            let base = menu + DUMP_START + row * 16;
-            let words: Vec<String> = (0..4)
-                .map(|i| {
-                    let value = unsafe { *((base + i * 4) as *const u32) };
-                    format!("{value:08X}")
-                })
-                .collect();
-
-            log_info!("  +0x{:03X}  {}", DUMP_START + row * 16, words.join(" "));
+        let bags = registry::known_bags();
+        if bags.is_empty() {
+            log_info!("  no bags known yet, so nothing to look for");
+            return;
         }
+
+        find_bag_pointer(menu, &bags);
     });
+}
+
+/// Searches the menu object for a pointer that leads to one of the bags.
+///
+/// The answer decides how the scroll hook will work. If the menu holds the bag
+/// it is showing, the hook reads it from there and looks the store up by
+/// address, and never has to reason about which character the panel belongs to.
+fn find_bag_pointer(menu: usize, bags: &[usize]) {
+    let Some(words) = read_words(menu, SCAN_BYTES) else {
+        log_info!("  menu object is not readable");
+        return;
+    };
+
+    let mut found = 0;
+    let mut followed = 0;
+    let mut seen: Vec<usize> = Vec::new();
+
+    for (index, &value) in words.iter().enumerate() {
+        let offset = index * 4;
+
+        if let Some(description) = describe_target(value, bags) {
+            log_info!("  menu+0x{offset:03X} -> {description}");
+            found += 1;
+            continue;
+        }
+
+        // Not a bag itself. If it looks like a pointer, follow it once: the
+        // menu may hold the character, with the bag inside that.
+        if !is_plausible_pointer(value) || seen.contains(&value) || followed >= MAX_FOLLOWED {
+            continue;
+        }
+
+        seen.push(value);
+        followed += 1;
+
+        let Some(nested) = read_words(value, NESTED_SCAN_BYTES) else {
+            continue;
+        };
+
+        for (inner_index, &target) in nested.iter().enumerate() {
+            if let Some(description) = describe_target(target, bags) {
+                let inner = inner_index * 4;
+                log_info!("  menu+0x{offset:03X} -> 0x{value:08X} +0x{inner:03X} -> {description}");
+                found += 1;
+            }
+        }
+    }
+
+    if found == 0 {
+        log_info!("  no path from the menu to a known bag ({followed} pointers followed)");
+    }
+}
+
+/// Reads a run of little-endian 32-bit words.
+///
+/// One call per object rather than one per word: this runs while the game is
+/// mid-frame, and thousands of separate reads would show up as a stutter.
+fn read_words(address: usize, bytes: usize) -> Option<Vec<usize>> {
+    let mut buffer = vec![0u8; bytes];
+    if !memory::read(address, &mut buffer) {
+        return None;
+    }
+
+    Some(
+        buffer
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|chunk| u32::from_le_bytes(*chunk) as usize)
+            .collect(),
+    )
+}
+
+/// Names `value` if it is a bag, or the parent object holding one.
+fn describe_target(value: usize, bags: &[usize]) -> Option<String> {
+    for &bag in bags {
+        if value == bag {
+            return Some(format!("bag 0x{bag:08X}"));
+        }
+
+        for offset in BAG_OFFSETS {
+            if bag.checked_sub(offset) == Some(value) {
+                return Some(format!("parent of bag 0x{bag:08X}, at +0x{offset:02X}"));
+            }
+        }
+    }
+
+    None
+}
+
+/// Whether a value is worth dereferencing. Keeps the nested search away from
+/// small integers and obvious rubbish; the read itself is checked anyway.
+fn is_plausible_pointer(value: usize) -> bool {
+    const USER_MIN: usize = 0x0001_0000;
+    const USER_MAX: usize = 0x7FFF_0000;
+
+    (USER_MIN..USER_MAX).contains(&value) && value.is_multiple_of(4)
 }

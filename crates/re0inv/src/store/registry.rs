@@ -117,3 +117,14 @@ pub fn forget_all() {
         log_info!("Dropped {count} store(s).");
     }
 }
+
+/// Addresses of every bag a store has been created for.
+///
+/// Used by the menu probe: knowing which addresses are bags turns "dump some
+/// memory and squint" into "find where the menu keeps the bag it is showing".
+pub fn known_bags() -> Vec<usize> {
+    match REGISTRY.lock() {
+        Ok(registry) => registry.entries.iter().map(|entry| entry.bag).collect(),
+        Err(_) => Vec::new(),
+    }
+}
