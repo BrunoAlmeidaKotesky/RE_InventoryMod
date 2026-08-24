@@ -76,6 +76,60 @@ pub unsafe extern "C" fn partner_bag_stub() {
     )
 }
 
+/// Entry stub for the accessor that takes the character id as an argument.
+///
+/// This is the one the rest of the game reaches for. It has thirty direct
+/// callers, and the wrapper at `0x0050DC70` calls it too, so hooking it here
+/// covers every path that was still seeing the game's own bag — including the
+/// one that hands out items at the start of a game.
+///
+/// # Safety
+/// Reached only through the detour over the original: `ecx` holds the object
+/// owning the bags, the character id is the single stack argument, and the
+/// callee removes it.
+#[unsafe(naked)]
+pub unsafe extern "C" fn character_bag_stub() {
+    core::arch::naked_asm!(
+        // Arguments in reverse. The id is still at [esp+4] because nothing has
+        // been pushed yet; the return address is at [esp].
+        "push dword ptr [esp + 4]",
+        "push ecx",
+        "call {handler}",
+        "add esp, 8",
+        // The original is __thiscall with one stack argument, so it cleans it.
+        "ret 4",
+        handler = sym character_bag,
+    )
+}
+
+extern "C" fn character_bag(owner: usize, character_id: i32) -> usize {
+    let result = std::panic::catch_unwind(|| {
+        if owner == 0 || !owner.is_multiple_of(4) {
+            return NO_BAG;
+        }
+
+        let Some(offset) = offset_for_id(character_id) else {
+            return NO_BAG;
+        };
+
+        // Safety: the game was about to return this address itself.
+        let view = unsafe { registry::view_for(owner, offset) };
+
+        if view.is_null() {
+            return owner + offset;
+        }
+
+        view as usize
+    });
+
+    unsafe { crate::hook::panel::redraw_if_requested() };
+
+    result.unwrap_or_else(|_| {
+        log_warn!("Bag accessor by id panicked.");
+        NO_BAG
+    })
+}
+
 extern "C" fn player_bag(owner: usize) -> usize {
     let Some(addresses) = addresses() else {
         return NO_BAG;
@@ -151,13 +205,24 @@ fn bag_offset(owner: usize, character_getter: usize, addresses: &Addresses) -> O
 
     let id = unsafe { thiscall0(addresses.character_id, character) } as i32;
 
+    let offset = offset_for_id(id);
+    if offset.is_none() {
+        log_debug!("Unrecognised character id {id} for owner 0x{owner:08X}.");
+    }
+
+    offset
+}
+
+/// Which of the two inline bags a character id refers to.
+///
+/// Straight from the originals, all of which compare against the same five ids
+/// and answer with the same two offsets.
+fn offset_for_id(id: i32) -> Option<usize> {
     if FIRST_BAG_IDS.contains(&id) {
         return Some(FIRST_BAG_OFFSET);
     }
     if SECOND_BAG_IDS.contains(&id) {
         return Some(SECOND_BAG_OFFSET);
     }
-
-    log_debug!("Unrecognised character id {id} for owner 0x{owner:08X}.");
     None
 }

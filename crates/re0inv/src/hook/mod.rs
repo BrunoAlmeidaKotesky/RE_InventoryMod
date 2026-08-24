@@ -131,6 +131,16 @@ pub unsafe fn install_all(addresses: &Addresses) -> Hooks {
         &DRAW_PROLOGUE,
     );
 
+    // `mov eax, [esp+4]; cmp ...`
+    const BAG_BY_ID_PROLOGUE: [u8; 5] = [0x8B, 0x44, 0x24, 0x04, 0x83];
+
+    hooks.detour(
+        "Inventory::bag_by_id",
+        addresses.bag_by_id,
+        accessor::character_bag_stub as unsafe extern "C" fn() as usize,
+        &BAG_BY_ID_PROLOGUE,
+    );
+
     hooks.detour(
         "Bag::count_empty",
         addresses.bag_count_empty,

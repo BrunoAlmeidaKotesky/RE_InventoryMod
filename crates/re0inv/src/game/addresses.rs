@@ -24,6 +24,9 @@ pub struct Addresses {
     pub player_bag: usize,
     /// `Bag* __thiscall(owner)` - the partner's bag.
     pub partner_bag: usize,
+    /// `Bag* __thiscall(owner, character_id)` - the primitive the rest of the
+    /// game reaches for, and what the wrapper at 0x0050DC70 calls.
+    pub bag_by_id: usize,
 
     /// Global holding the object that knows who the characters are.
     pub character_holder: usize,
@@ -49,6 +52,7 @@ const JAN_2025: Addresses = Addresses {
 
     player_bag: 0x004D_C8E0,
     partner_bag: 0x004D_CA00,
+    bag_by_id: 0x004D_C8B0,
 
     character_holder: 0x00DC_BF3C,
     played_character: 0x004E_C780,
