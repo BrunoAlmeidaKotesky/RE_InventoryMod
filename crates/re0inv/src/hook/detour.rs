@@ -1,6 +1,6 @@
 //! Redirecting a game function to one of ours.
 //!
-//! A detour writes a five-byte relative jump over the start of the target. From
+//! A detour writes a five-yte relative jump over the start of the target. From
 //! then on, calling the game function lands in the replacement instead.
 //!
 //! This only works for functions we replace outright. Calling the original from
@@ -42,6 +42,9 @@ pub fn jump_bytes(from: usize, to: usize) -> Option<[u8; JUMP_LENGTH]> {
     ])
 }
 
+/// `nop`, used to fill out an instruction longer than the jump.
+const OP_NOP: u8 = 0x90;
+
 /// A game function redirected to a replacement.
 pub struct Detour {
     name: &'static str,
@@ -49,21 +52,55 @@ pub struct Detour {
 }
 
 impl Detour {
-    /// Redirects `target` to `replacement`.
+    /// Redirects `target` to `replacement`, but only if the bytes there are the
+    /// ones the caller expected.
+    ///
+    /// `expected` is the original instruction, or instructions, being replaced.
+    /// It serves two purposes. It states at the call site what the author
+    /// believed was there, which is checkable later against a disassembly. And
+    /// it refuses to write when the belief is wrong — a different build, or
+    /// another mod that patched the same address first. Overwriting either of
+    /// those produces memory corruption with no visible cause.
+    ///
+    /// The replacement must be at least five bytes long; anything past that is
+    /// padded with `nop` so no partial instruction is left behind.
     ///
     /// # Safety
-    /// `target` must be the entry point of a game function whose calling
-    /// convention the replacement matches exactly, including how the stack is
-    /// cleaned up. Getting that wrong corrupts the caller's stack, and the crash
-    /// happens somewhere else entirely.
-    ///
-    /// The first five bytes of the target are destroyed, so the replacement must
-    /// not need to call the original.
-    pub unsafe fn install(name: &'static str, target: usize, replacement: usize) -> Option<Detour> {
-        let Some(bytes) = jump_bytes(target, replacement) else {
+    /// `target` must be inside the game's mapped code, and `replacement` must
+    /// leave the machine in a state the code after the patch can continue from:
+    /// the same registers live, the same stack depth, and control handed back to
+    /// an instruction boundary.
+    pub unsafe fn install_over(
+        name: &'static str,
+        target: usize,
+        replacement: usize,
+        expected: &[u8],
+    ) -> Option<Detour> {
+        if expected.len() < JUMP_LENGTH {
+            log_error!(
+                "{name}: {} bytes at 0x{target:08X} is not enough for a jump.",
+                expected.len()
+            );
+            return None;
+        }
+
+        let found = std::slice::from_raw_parts(target as *const u8, expected.len());
+        if found != expected {
+            log_error!(
+                "{name}: 0x{target:08X} holds {} but {} was expected. Not patching.",
+                hex(found),
+                hex(expected)
+            );
+            return None;
+        }
+
+        let Some(jump) = jump_bytes(target, replacement) else {
             log_error!("{name}: 0x{target:08X} is out of jump range from 0x{replacement:08X}.");
             return None;
         };
+
+        let mut bytes = vec![OP_NOP; expected.len()];
+        bytes[..JUMP_LENGTH].copy_from_slice(&jump);
 
         let patch = Patch::write(target, &bytes)?;
         log_info!("Hooked {name} at 0x{target:08X}.");
@@ -80,6 +117,14 @@ impl Detour {
     pub unsafe fn remove(&self) -> bool {
         self.patch.revert()
     }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|b| format!("{:02X}", b))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(test)]
@@ -129,3 +174,4 @@ mod tests {
         assert!(jump_bytes(0, u64::MAX as usize).is_none());
     }
 }
+

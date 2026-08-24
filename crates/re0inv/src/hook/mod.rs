@@ -5,6 +5,7 @@
 
 pub mod bag;
 pub mod detour;
+pub mod menu;
 pub mod patch;
 
 use std::sync::Mutex;
@@ -41,8 +42,14 @@ impl Hooks {
     ///
     /// # Safety
     /// See `Detour::install`.
-    pub unsafe fn detour(&mut self, name: &'static str, target: usize, replacement: usize) -> bool {
-        match Detour::install(name, target, replacement) {
+    pub unsafe fn detour(
+        &mut self,
+        name: &'static str,
+        target: usize,
+        replacement: usize,
+        expected: &[u8],
+    ) -> bool {
+        match Detour::install_over(name, target, replacement, expected) {
             Some(detour) => {
                 self.detours.push(detour);
                 true
@@ -86,16 +93,44 @@ impl Hooks {
 pub unsafe fn install_all(addresses: &Addresses) -> Hooks {
     let mut hooks = Hooks::new();
 
+    // `push ebx; push esi; xor esi, esi; xor ...`
+    const COUNT_EMPTY_PROLOGUE: [u8; 5] = [0x53, 0x56, 0x33, 0xF6, 0x33];
+    // `push esi; xor esi, esi; push edi; lea ...`
+    const FIRST_EMPTY_PROLOGUE: [u8; 5] = [0x56, 0x33, 0xF6, 0x57, 0x8D];
+    // `mov eax, [edi+0x2BC]`, on both cursor paths.
+    const CURSOR_READ: [u8; 6] = [0x8B, 0x87, 0xBC, 0x02, 0x00, 0x00];
+
     hooks.detour(
         "Bag::count_empty",
         addresses.bag_count_empty,
         bag::count_empty_stub as unsafe extern "C" fn() as usize,
+        &COUNT_EMPTY_PROLOGUE,
     );
 
     hooks.detour(
         "Bag::first_empty",
         addresses.bag_first_empty,
         bag::first_empty_stub as unsafe extern "C" fn() as usize,
+        &FIRST_EMPTY_PROLOGUE,
+    );
+
+    // Observation only: these report what the menu holds and change nothing.
+    // They have to know where to hand control back before they are installed.
+    menu::set_up_continue(addresses.cursor_read_up_continue);
+    menu::set_down_continue(addresses.cursor_read_down_continue);
+
+    hooks.detour(
+        "Menu::cursor_read_up",
+        addresses.cursor_read_up,
+        menu::cursor_up_stub as unsafe extern "C" fn() as usize,
+        &CURSOR_READ,
+    );
+
+    hooks.detour(
+        "Menu::cursor_read_down",
+        addresses.cursor_read_down,
+        menu::cursor_down_stub as unsafe extern "C" fn() as usize,
+        &CURSOR_READ,
     );
 
     log_info!("{} hook(s) installed.", hooks.len());

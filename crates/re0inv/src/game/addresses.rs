@@ -18,12 +18,27 @@ pub struct Addresses {
     pub bag_count_empty: usize,
     /// `int __thiscall(Bag*)` - index of the first empty slot, or -1 if full.
     pub bag_first_empty: usize,
+
+    /// `mov eax, [edi+0x2BC]` on the cursor-up path. Six bytes, no flags.
+    pub cursor_read_up: usize,
+    /// The instruction after it, where the trampoline hands control back.
+    pub cursor_read_up_continue: usize,
+
+    /// The same pair on the cursor-down path.
+    pub cursor_read_down: usize,
+    pub cursor_read_down_continue: usize,
 }
 
 /// `MasterRelease Jan 28 2025 16:45:59`.
 const JAN_2025: Addresses = Addresses {
     bag_count_empty: 0x004D_B480,
     bag_first_empty: 0x004D_B440,
+
+    cursor_read_up: 0x005E_3BD1,
+    cursor_read_up_continue: 0x005E_3BD7,
+
+    cursor_read_down: 0x005E_3C99,
+    cursor_read_down_continue: 0x005E_3C9F,
 };
 
 pub fn for_build(build: &Build) -> Option<Addresses> {
