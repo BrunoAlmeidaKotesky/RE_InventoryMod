@@ -18,7 +18,7 @@
 use std::sync::Mutex;
 
 use crate::core::logging::{log_debug, log_info};
-use crate::game::inventory::Bag;
+use crate::game::inventory::{Bag, BAG_BYTES};
 use crate::store::window::Window;
 
 /// A bag the game owns, and the storage standing behind it.
@@ -115,6 +115,69 @@ pub fn forget_all() {
         let count = registry.entries.len();
         registry.entries.clear();
         log_info!("Dropped {count} store(s).");
+    }
+}
+
+/// Scrolls every store by `rows` rows of two, and rewrites the bags.
+///
+/// Every store moves together rather than only the panel being looked at. The
+/// panels sit side by side, so moving both shows the same rows of each, and it
+/// sidesteps a question the game has not answered yet: which character a given
+/// panel belongs to. Getting that wrong would scroll the other character's
+/// inventory, which is worse than scrolling both.
+///
+/// The bag is written here rather than waiting for the next intercepted call,
+/// because the menu draws from the bag and nothing else would happen until the
+/// player did something that happens to be hooked.
+///
+/// Returns how many stores actually moved.
+pub fn scroll_all(rows: i32) -> usize {
+    let Ok(mut registry) = REGISTRY.lock() else {
+        return 0;
+    };
+
+    let mut moved = 0;
+
+    for entry in registry.entries.iter_mut() {
+        // The bag lives in an object the game owns and can free. Reading it
+        // first turns a stale address into a skipped entry instead of a crash.
+        if crate::debug::memory::read_array::<BAG_BYTES>(entry.bag).is_none() {
+            log_debug!("Bag at 0x{:08X} is gone; skipping.", entry.bag);
+            continue;
+        }
+
+        let bag = entry.bag as *mut Bag;
+
+        // Take in whatever the game wrote before moving, or the slots currently
+        // on screen would be lost.
+        unsafe { entry.window.read_from(&*bag) };
+
+        if !entry.window.scroll_rows(rows) {
+            continue;
+        }
+
+        unsafe { entry.window.write_into(&mut *bag) };
+        moved += 1;
+    }
+
+    moved
+}
+
+/// Where each store's window currently sits, for logging.
+pub fn positions() -> Vec<(usize, usize, usize)> {
+    match REGISTRY.lock() {
+        Ok(registry) => registry
+            .entries
+            .iter()
+            .map(|entry| {
+                (
+                    entry.bag,
+                    entry.window.position(),
+                    entry.window.store().capacity(),
+                )
+            })
+            .collect(),
+        Err(_) => Vec::new(),
     }
 }
 

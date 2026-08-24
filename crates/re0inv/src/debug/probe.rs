@@ -22,7 +22,12 @@ use crate::win32::{GetAsyncKeyState, KEY_PRESSED};
 use crate::core::config::Config;
 use crate::core::logging::{log_info, log_warn};
 use crate::debug::memory;
-use crate::game::inventory::{Bag, BAG_BYTES};
+use crate::game::inventory::{Bag, BAG_BYTES, BAG_SIZE};
+use crate::store::registry;
+
+/// Page Up and Page Down scroll the inventory window.
+const VK_PAGE_UP: i32 = 0x21;
+const VK_PAGE_DOWN: i32 = 0x22;
 
 const VK_F8: i32 = 0x77;
 const VK_F9: i32 = 0x78;
@@ -42,13 +47,22 @@ const MAX_INSPECTED: usize = 8;
 static HITS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 
 /// Polls the hotkeys forever. Runs on its own thread.
-pub fn run(ini: PathBuf) {
-    log_info!(
-        "Memory probe active. F8 remove hooks, F9 scan, F10 narrow, F11 inspect, F12 memory map."
-    );
+pub fn run(ini: PathBuf, debug_keys: bool) {
+    log_info!("Page Up and Page Down scroll the inventory.");
+    if debug_keys {
+        log_info!("Debug keys: F8 remove hooks, F9 scan, F10 narrow, F11 inspect, F12 memory map.");
+    }
 
-    let keys = [VK_F8, VK_F9, VK_F10, VK_F11, VK_F12];
-    let mut was_down = [false; 5];
+    let keys = [
+        VK_PAGE_UP,
+        VK_PAGE_DOWN,
+        VK_F8,
+        VK_F9,
+        VK_F10,
+        VK_F11,
+        VK_F12,
+    ];
+    let mut was_down = [false; 7];
 
     loop {
         for (i, &key) in keys.iter().enumerate() {
@@ -56,7 +70,7 @@ pub fn run(ini: PathBuf) {
 
             // Edge trigger: act once per press, not once per poll.
             if down && !was_down[i] {
-                dispatch(key, &ini);
+                dispatch(key, &ini, debug_keys);
             }
             was_down[i] = down;
         }
@@ -65,8 +79,13 @@ pub fn run(ini: PathBuf) {
     }
 }
 
-fn dispatch(key: i32, ini: &Path) {
+fn dispatch(key: i32, ini: &Path, debug_keys: bool) {
+    // Scrolling is a feature, not a diagnostic, so it works regardless of
+    // whether the debug keys are switched on.
     match key {
+        VK_PAGE_UP => scroll(-1),
+        VK_PAGE_DOWN => scroll(1),
+        _ if !debug_keys => {}
         VK_F8 => unsafe { crate::hook::remove_all_installed() },
         VK_F9 => scan(ini),
         VK_F10 => narrow(ini),
@@ -209,6 +228,26 @@ fn log_regions() {
             r.size / 1024,
             r.protect,
             if r.writable { " W" } else { "" }
+        );
+    }
+}
+
+/// Moves every inventory window by one row and reports where they landed.
+fn scroll(rows: i32) {
+    let moved = registry::scroll_all(rows);
+
+    if moved == 0 {
+        log_info!("Nothing to scroll.");
+        return;
+    }
+
+    for (bag, position, capacity) in registry::positions() {
+        log_info!(
+            "Bag 0x{:08X}: showing slots {}-{} of {}.",
+            bag,
+            position + 1,
+            position + BAG_SIZE,
+            capacity
         );
     }
 }
