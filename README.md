@@ -1,10 +1,17 @@
 # RE0 Inventory Expansion
 
-An inventory expansion mod for **Resident Evil 0 HD Remaster** (PC / Steam), written in
-Rust and distributed as a 32-bit ASI plugin.
+A bundle of quality-of-life improvements for **Resident Evil 0 HD Remaster**
+(PC / Steam), written in Rust and distributed as a single 32-bit ASI plugin.
+Each improvement can be switched on or off on its own.
 
-The goal is to raise the per-character inventory from the vanilla 6 slots to a larger,
-configurable count — both the logical inventory and its on-screen panel.
+- **Expanded inventory** — more than the vanilla six slots per character,
+  scrolled inside the panel the game already draws.
+- **Item box** — storage for what does not fit, reimplemented from scratch.
+- **No door animations** — skip the transition between rooms.
+
+One plugin rather than three because they share the same machinery: reading the
+game's code, patching it reversibly, and standing between the game and its own
+inventory.
 
 > **Status: pre-alpha.** Reconnaissance phase. Nothing is playable yet. Do not install
 > this on a save you care about.
