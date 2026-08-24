@@ -24,7 +24,25 @@ use crate::game::inventory::{Bag, BAG_SIZE};
 /// hook is live and returning sane values, then silence.
 const LOG_LIMIT: usize = 8;
 
+/// What the game's own search returns when there is no empty slot.
+const NO_EMPTY_SLOT: i32 = -1;
+
 static COUNT_EMPTY_CALLS: AtomicUsize = AtomicUsize::new(0);
+static FIRST_EMPTY_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+/// Logs the first few calls to a replacement, then stops.
+///
+/// Returns whether this call was logged, so the caller can build the message
+/// only when it will be used.
+fn should_log(calls: &AtomicUsize, name: &str) -> bool {
+    let seen = calls.fetch_add(1, Ordering::Relaxed);
+
+    if seen == LOG_LIMIT {
+        log_debug!("{name}: logged {LOG_LIMIT} calls, staying quiet from here.");
+    }
+
+    seen < LOG_LIMIT
+}
 
 /// Reads the bag the game passed, if it looks like a bag at all.
 ///
@@ -79,8 +97,7 @@ extern "C" fn count_empty(bag: *const Bag) -> i32 {
 
         let empty = bag.items.iter().filter(|item| item.is_empty()).count() as i32;
 
-        let calls = COUNT_EMPTY_CALLS.fetch_add(1, Ordering::Relaxed);
-        if calls < LOG_LIMIT {
+        if should_log(&COUNT_EMPTY_CALLS, "count_empty") {
             log_info!(
                 "count_empty(0x{:08X}) = {} of {}  [{}]",
                 bag as *const Bag as usize,
@@ -88,8 +105,6 @@ extern "C" fn count_empty(bag: *const Bag) -> i32 {
                 BAG_SIZE,
                 describe(bag)
             );
-        } else if calls == LOG_LIMIT {
-            log_debug!("count_empty: logged {LOG_LIMIT} calls, staying quiet from here.");
         }
 
         empty
@@ -100,6 +115,59 @@ extern "C" fn count_empty(bag: *const Bag) -> i32 {
     result.unwrap_or_else(|_| {
         log_warn!("count_empty panicked.");
         0
+    })
+}
+
+/// Entry stub for the game's "index of the first empty slot" method.
+///
+/// # Safety
+/// Same contract as `count_empty_stub`.
+#[unsafe(naked)]
+pub unsafe extern "C" fn first_empty_stub() {
+    core::arch::naked_asm!(
+        "push ecx",
+        "call {handler}",
+        "add esp, 4",
+        "ret",
+        handler = sym first_empty,
+    )
+}
+
+/// Index of the bag's first empty slot, or `-1` when it is full.
+///
+/// Another faithful reimplementation. This one is reached whenever the game
+/// puts any item into a bag, not only a two-slot one, which makes it the cheap
+/// way to prove the hooks are live.
+extern "C" fn first_empty(bag: *const Bag) -> i32 {
+    let result = std::panic::catch_unwind(|| unsafe {
+        let Some(bag) = bag_ref(bag) else {
+            log_warn!("first_empty called with an unusable pointer: {:?}", bag);
+            return NO_EMPTY_SLOT;
+        };
+
+        let found = bag
+            .items
+            .iter()
+            .position(|item| item.is_empty())
+            .map_or(NO_EMPTY_SLOT, |index| index as i32);
+
+        if should_log(&FIRST_EMPTY_CALLS, "first_empty") {
+            log_info!(
+                "first_empty(0x{:08X}) = {}  [{}]",
+                bag as *const Bag as usize,
+                found,
+                describe(bag)
+            );
+        }
+
+        found
+    });
+
+    // "No empty slot" is the conservative answer: the game declines to add the
+    // item rather than writing one somewhere it should not.
+    result.unwrap_or_else(|_| {
+        log_warn!("first_empty panicked.");
+        NO_EMPTY_SLOT
     })
 }
 

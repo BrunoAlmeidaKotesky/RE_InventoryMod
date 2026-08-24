@@ -92,6 +92,12 @@ pub unsafe fn install_all(addresses: &Addresses) -> Hooks {
         bag::count_empty_stub as unsafe extern "C" fn() as usize,
     );
 
+    hooks.detour(
+        "Bag::first_empty",
+        addresses.bag_first_empty,
+        bag::first_empty_stub as unsafe extern "C" fn() as usize,
+    );
+
     log_info!("{} hook(s) installed.", hooks.len());
     hooks
 }

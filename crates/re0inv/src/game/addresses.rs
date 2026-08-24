@@ -16,11 +16,14 @@ use super::build::Build;
 pub struct Addresses {
     /// `int __thiscall(Bag*)` - number of empty slots.
     pub bag_count_empty: usize,
+    /// `int __thiscall(Bag*)` - index of the first empty slot, or -1 if full.
+    pub bag_first_empty: usize,
 }
 
 /// `MasterRelease Jan 28 2025 16:45:59`.
 const JAN_2025: Addresses = Addresses {
     bag_count_empty: 0x004D_B480,
+    bag_first_empty: 0x004D_B440,
 };
 
 pub fn for_build(build: &Build) -> Option<Addresses> {
