@@ -29,7 +29,7 @@ const OFFSET_CURSOR: usize = 0x2BC;
 const OFFSET_FLAG: usize = 0x2C6;
 
 /// How much of the menu object to search for a bag pointer.
-const SCAN_BYTES: usize = 0x600;
+const SCAN_BYTES: usize = 0x1000;
 
 /// How far into an object the menu points at to keep searching.
 ///
@@ -37,13 +37,18 @@ const SCAN_BYTES: usize = 0x600;
 /// itself, in which case the bag is one hop further on.
 const NESTED_SCAN_BYTES: usize = 0x200;
 
-/// How many distinct pointers to follow one level down. A bound keeps a menu
-/// full of pointers from turning one keypress into a long pause.
-const MAX_FOLLOWED: usize = 64;
+/// How many distinct pointers to follow one level down. Each is one block read,
+/// so the bound is about keeping a keypress from turning into a visible pause,
+/// not about cost per word.
+const MAX_FOLLOWED: usize = 512;
 
 /// Offsets of the two bags inside their parent object. A pointer to the parent
 /// is as good as a pointer to the bag, so both are worth recognising.
 const BAG_OFFSETS: [usize; 2] = [0x20, 0x60];
+
+/// Region dumped verbatim on every observation, bracketing the known fields.
+const FIELD_DUMP_START: usize = 0x280;
+const FIELD_DUMP_BYTES: usize = 0x80;
 
 /// Observations logged before going quiet. Enough to cover moving around both
 /// panels a few times.
@@ -146,6 +151,11 @@ extern "C" fn observe(menu: usize) {
         let flag = unsafe { *((menu + OFFSET_FLAG) as *const u8) };
 
         log_info!("menu 0x{menu:08X}  cursor {cursor}  +0x2C6 {flag}");
+
+        // A compact window over the fields around the cursor. Comparing this
+        // between one panel and the other is what identifies the field that
+        // says which panel is being navigated.
+        dump(menu, FIELD_DUMP_START, FIELD_DUMP_BYTES);
 
         let bags = registry::known_bags();
         if bags.is_empty() {
@@ -252,4 +262,17 @@ fn is_plausible_pointer(value: usize) -> bool {
     const USER_MAX: usize = 0x7FFF_0000;
 
     (USER_MIN..USER_MAX).contains(&value) && value.is_multiple_of(4)
+}
+
+/// Prints a region of an object as 32-bit words, four per line.
+fn dump(base: usize, start: usize, bytes: usize) {
+    let Some(words) = read_words(base + start, bytes) else {
+        log_info!("  +0x{start:03X}: unreadable");
+        return;
+    };
+
+    for (row, chunk) in words.chunks(4).enumerate() {
+        let text: Vec<String> = chunk.iter().map(|w| format!("{w:08X}")).collect();
+        log_info!("  +0x{:03X}  {}", start + row * 16, text.join(" "));
+    }
 }
