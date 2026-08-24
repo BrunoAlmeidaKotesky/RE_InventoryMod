@@ -11,6 +11,8 @@
 //! at `+0x20` or `+0x60` of the object it was called on. The two differ only in
 //! which character they ask about.
 
+use std::sync::OnceLock;
+
 use crate::core::logging::{log_debug, log_warn};
 use crate::game::addresses::Addresses;
 use crate::game::call::thiscall0;
@@ -29,19 +31,18 @@ const NO_BAG: usize = 0;
 
 /// Addresses the replacements need, filled in at install time.
 ///
-/// A copy rather than a lookup: these run on the drawing path, and reaching
-/// through a lock every frame to fetch a constant would be a poor trade.
-static mut RESOLVED: Option<Addresses> = None;
+/// A `OnceLock` rather than a `static mut`: these are read from the game's
+/// thread while the installing thread is still running, and a plain mutable
+/// static read across threads is a data race no comment can make safe.
+static RESOLVED: OnceLock<Addresses> = OnceLock::new();
 
-/// # Safety
-/// Call once, before either stub can run.
-pub unsafe fn set_addresses(addresses: &Addresses) {
-    RESOLVED = Some(*addresses);
+/// Records the addresses. Later calls are ignored.
+pub fn set_addresses(addresses: &Addresses) {
+    let _ = RESOLVED.set(*addresses);
 }
 
 fn addresses() -> Option<Addresses> {
-    // Safety: written once at install time, before any hook is reachable.
-    unsafe { RESOLVED }
+    RESOLVED.get().copied()
 }
 
 /// Entry stub for the accessor that returns the played character's bag.

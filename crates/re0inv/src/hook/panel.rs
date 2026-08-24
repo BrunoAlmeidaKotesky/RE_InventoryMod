@@ -87,9 +87,12 @@ pub unsafe fn redraw_if_requested() {
         return;
     }
 
-    crate::game::call::thiscall0(draw, menu);
+    // Cleared by the guard even if the call below unwinds, which a plain store
+    // after it would not do. A stuck flag would silently disable every redraw
+    // from then on.
+    let _guard = RedrawGuard;
 
-    REDRAWING.store(false, Ordering::Relaxed);
+    crate::game::call::thiscall0(draw, menu);
 }
 
 /// Cursor position within the panel, 0 to 5. Two columns, so a row is two.
@@ -135,7 +138,9 @@ pub unsafe fn set_cursor(value: i32) -> bool {
         return false;
     }
 
-    *((menu + OFFSET_CURSOR) as *mut i32) = value;
+    // Volatile: the game reads this field on its own thread, so the write must
+    // not be reordered or folded away.
+    ((menu + OFFSET_CURSOR) as *mut i32).write_volatile(value);
     true
 }
 
@@ -193,4 +198,13 @@ extern "C" fn observe(menu: usize) {
             log_debug!("Panel draws: logged {LOG_LIMIT}, staying quiet from here.");
         }
     });
+}
+
+/// Clears the re-entry flag however the redraw ends.
+struct RedrawGuard;
+
+impl Drop for RedrawGuard {
+    fn drop(&mut self) {
+        REDRAWING.store(false, Ordering::Relaxed);
+    }
 }

@@ -35,9 +35,15 @@ struct Entry {
     owner: usize,
     offset: usize,
 
-    /// The bag handed to the game. Boxed so its address never moves: the game
-    /// keeps hold of it between calls.
-    view: Box<Bag>,
+    /// The bag handed to the game.
+    ///
+    /// A raw allocation rather than a `Box`, and never turned into a reference.
+    /// The game writes into this while it is ours, and a Rust reference to
+    /// memory something else is writing is undefined behaviour: the compiler is
+    /// entitled to assume nothing else touches it and to keep values in
+    /// registers across the writes. Every access goes through a volatile read
+    /// or write of the whole structure.
+    view: *mut Bag,
 
     /// What the game's own bag held last time this entry was looked at.
     ///
@@ -54,18 +60,31 @@ struct Entry {
 }
 
 impl Entry {
+    /// Takes a copy of the bag the game has been writing into.
+    fn read_view(&self) -> Bag {
+        // Safety: the allocation is this entry's and outlives it.
+        unsafe { read(self.view) }
+    }
+
+    /// Publishes a bag for the game to read.
+    fn write_view(&self, bag: &Bag) {
+        unsafe { write(self.view, bag) };
+    }
+
     /// Refreshes the view from the store, after taking in whatever the game
     /// wrote into it since last time.
     fn sync(&mut self) {
-        self.window.read_from(&self.view);
-        self.window.write_into(&mut self.view);
+        let mut bag = self.read_view();
+        self.window.read_from(&bag);
+        self.window.write_into(&mut bag);
+        self.write_view(&bag);
     }
 
     /// Starts the store over from a bag the game filled in behind our back.
     fn reseed(&mut self, source: &Bag) {
         self.window = Window::new(self.window.store().capacity());
         self.window.read_from(source);
-        *self.view = *source;
+        self.write_view(source);
     }
 
     /// Reports what the game is about to be shown, when it changes.
@@ -74,7 +93,8 @@ impl Entry {
     /// answer is different from last time. Without that it would be thousands of
     /// identical lines; with it, every line is a change worth explaining.
     fn report(&mut self) {
-        let ids: Vec<i32> = self.view.items.iter().map(|item| item.id).collect();
+        let bag = self.read_view();
+        let ids: Vec<i32> = bag.items.iter().map(|item| item.id).collect();
         let fingerprint = format!("{}:{:?}", self.window.position(), ids);
 
         if self.last_reported == fingerprint {
@@ -88,9 +108,41 @@ impl Entry {
             self.offset,
             self.window.position() + 1,
             ids,
-            self.view.equipped_index
+            bag.equipped_index
         );
     }
+}
+
+// Safety: the pointer is a plain allocation this entry owns and frees, and
+// every access goes through the volatile helpers below. Sending it between
+// threads is no less safe than sending the `Box` it replaced; the reason it is
+// a raw pointer is aliasing with the game, not thread ownership.
+unsafe impl Send for Entry {}
+
+impl Drop for Entry {
+    fn drop(&mut self) {
+        // Safety: allocated by `Box::into_raw` in `view_for` and not handed to
+        // anything that outlives this entry. The game may still hold the
+        // address, which is why entries are only dropped when the object they
+        // belong to is already gone.
+        unsafe { drop(Box::from_raw(self.view)) };
+    }
+}
+
+/// Copies a bag out of memory something else may be writing.
+///
+/// # Safety
+/// `at` must point at a readable, correctly aligned `Bag`.
+unsafe fn read(at: *const Bag) -> Bag {
+    at.read_volatile()
+}
+
+/// Copies a bag into memory something else may be reading.
+///
+/// # Safety
+/// `at` must point at a writable, correctly aligned `Bag`.
+unsafe fn write(at: *mut Bag, value: &Bag) {
+    at.write_volatile(*value);
 }
 
 pub struct Registry {
@@ -141,7 +193,11 @@ pub unsafe fn view_for(owner: usize, offset: usize) -> *mut Bag {
         return std::ptr::null_mut();
     };
 
-    let own = &mut *((owner + offset) as *mut Bag);
+    // The game's own bag, only ever touched through raw reads and writes. The
+    // game writes it too, so a reference here would be a promise this code
+    // cannot keep.
+    let own_ptr = (owner + offset) as *mut Bag;
+    let own = read(own_ptr);
 
     let index = match registry.find(owner, offset) {
         Some(index) => index,
@@ -149,7 +205,7 @@ pub unsafe fn view_for(owner: usize, offset: usize) -> *mut Bag {
             let capacity = registry.capacity;
 
             let mut window = Window::new(capacity);
-            window.read_from(own);
+            window.read_from(&own);
 
             log_info!(
                 "New store for the bag at 0x{:08X}+0x{:02X}: {} slots.",
@@ -161,8 +217,8 @@ pub unsafe fn view_for(owner: usize, offset: usize) -> *mut Bag {
             registry.entries.push(Entry {
                 owner,
                 offset,
-                view: Box::new(*own),
-                mirror: *own,
+                view: Box::into_raw(Box::new(own)),
+                mirror: own,
                 window,
                 last_reported: String::new(),
             });
@@ -176,9 +232,13 @@ pub unsafe fn view_for(owner: usize, offset: usize) -> *mut Bag {
     // Someone wrote the game's own bag without going through here. Whatever it
     // put there is newer than anything the store holds, so the store restarts
     // from it rather than overwriting a freshly loaded inventory.
-    if entry.mirror != *own {
-        log_info!("Bag at 0x{:08X}+0x{:02X} changed underneath us; reseeding.", owner, offset);
-        entry.reseed(own);
+    if entry.mirror != own {
+        log_info!(
+            "Bag at 0x{:08X}+0x{:02X} changed underneath us; reseeding.",
+            owner,
+            offset
+        );
+        entry.reseed(&own);
     }
 
     entry.sync();
@@ -186,12 +246,13 @@ pub unsafe fn view_for(owner: usize, offset: usize) -> *mut Bag {
     // Keep the game's own bag showing what the view shows. Code that reaches it
     // without an accessor then sees the visible slots rather than a stale copy,
     // and this is also what makes the comparison above mean anything.
-    *own = *entry.view;
-    entry.mirror = *own;
+    let published = entry.read_view();
+    write(own_ptr, &published);
+    entry.mirror = published;
 
     entry.report();
 
-    &mut *entry.view as *mut Bag
+    entry.view
 }
 
 /// Forgets every store.
@@ -229,13 +290,15 @@ pub fn scroll_all(rows: i32) -> usize {
     for entry in registry.entries.iter_mut() {
         // Take in whatever the game wrote before moving, or the slots currently
         // on screen would be lost.
-        entry.window.read_from(&entry.view);
+        let mut bag = entry.read_view();
+        entry.window.read_from(&bag);
 
         if !entry.window.scroll_rows(rows) {
             continue;
         }
 
-        entry.window.write_into(&mut entry.view);
+        entry.window.write_into(&mut bag);
+        entry.write_view(&bag);
         moved += 1;
     }
 
@@ -284,13 +347,15 @@ pub fn with_view<R>(view: *const Bag, action: impl FnOnce(&mut Window) -> R) -> 
     let index = registry
         .entries
         .iter()
-        .position(|entry| std::ptr::eq(&*entry.view as *const Bag, view))?;
+        .position(|entry| std::ptr::eq(entry.view as *const Bag, view))?;
 
     let entry = &mut registry.entries[index];
 
-    entry.window.read_from(&entry.view);
+    let mut bag = entry.read_view();
+    entry.window.read_from(&bag);
     let result = action(&mut entry.window);
-    entry.window.write_into(&mut entry.view);
+    entry.window.write_into(&mut bag);
+    entry.write_view(&bag);
 
     Some(result)
 }
@@ -312,14 +377,16 @@ pub fn rewind_all() -> usize {
     let mut moved = 0;
 
     for entry in registry.entries.iter_mut() {
-        entry.window.read_from(&entry.view);
+        let mut bag = entry.read_view();
+        entry.window.read_from(&bag);
 
         if entry.window.position() == 0 {
             continue;
         }
 
         entry.window.reset();
-        entry.window.write_into(&mut entry.view);
+        entry.window.write_into(&mut bag);
+        entry.write_view(&bag);
         moved += 1;
     }
 
