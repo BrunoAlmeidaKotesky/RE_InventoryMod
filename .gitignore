@@ -1,0 +1,26 @@
+# ---- Material da Capcom: NUNCA versionar ----
+work/
+*.exe
+*.dll
+*.asi
+*.arc
+*.gmd
+*.pdb
+*.dmp
+*.bin
+
+# Saves e backups de save
+backups/
+*.sav
+data0.bin
+
+# ---- Build Rust ----
+target/
+**/*.rs.bk
+Cargo.lock
+
+# ---- Logs e temporarios ----
+*.log
+*.tmp
+.vscode/
+.idea/
