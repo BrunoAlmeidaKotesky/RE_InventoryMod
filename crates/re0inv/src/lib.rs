@@ -136,6 +136,7 @@ fn startup() {
         }
     }
 
+    store::registry::set_capacity(config.slots);
     install_hooks(detected.as_ref());
 
     log_info!("Initialization complete.");

@@ -8,9 +8,12 @@
 //! Nothing in this module touches game memory. It is ordinary Rust, and it is
 //! tested as such.
 
-// Nothing calls into here yet: the hooks that will are the next step. Without
-// this the whole module reads as dead code and buries real warnings.
+// Parts of this are not reachable from a hook yet: repair belongs with the
+// exchange and organise hooks, scrolling with the inventory UI, and forget_all
+// with new game and load. They are written and tested ahead of the hooks that
+// will call them, and this keeps that from burying a real warning.
 #![allow(dead_code)]
 
+pub mod registry;
 pub mod slots;
 pub mod window;

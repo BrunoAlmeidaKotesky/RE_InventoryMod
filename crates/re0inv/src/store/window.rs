@@ -102,6 +102,18 @@ impl Window {
         self.store.write_back(self.position, &bag.items);
     }
 
+    /// First visible slot that is empty, if any.
+    ///
+    /// This is what a caller can safely be told to write into: the game can
+    /// only address the six slots it has.
+    pub fn first_visible_empty(&self) -> Option<usize> {
+        (0..BAG_SIZE).find(|slot| {
+            self.store
+                .get(self.position + slot)
+                .is_none_or(|item| item.is_empty())
+        })
+    }
+
     /// Store index currently shown in visible slot `slot`.
     pub fn store_index(&self, slot: usize) -> Option<usize> {
         (slot < BAG_SIZE).then_some(self.position + slot)
@@ -281,6 +293,58 @@ mod tests {
 
         assert!(window.position() <= window.max_position());
         assert!(window.store().is_valid());
+    }
+
+    #[test]
+    fn a_free_slot_in_view_is_reported_by_its_visible_position() {
+        let mut window = Window::new(12);
+        window.store_mut().set(0, item(HERB));
+        window.store_mut().set(1, item(HERB));
+
+        assert_eq!(window.first_visible_empty(), Some(2));
+    }
+
+    #[test]
+    fn a_full_window_reports_nothing_visible_even_with_room_behind_it() {
+        let mut window = Window::new(12);
+        for i in 0..BAG_SIZE {
+            window.store_mut().set(i, item(HERB));
+        }
+
+        assert_eq!(window.first_visible_empty(), None);
+        assert_eq!(window.store().first_empty(), Some(BAG_SIZE));
+    }
+
+    /// The index these lookups produce is used by the game as a write target,
+    /// so it has to name one of the six slots the bag actually has. Anything
+    /// larger would write past the array and over the personal item.
+    #[test]
+    fn revealing_a_slot_behind_the_window_yields_a_writable_index() {
+        let mut window = Window::new(12);
+        for i in 0..BAG_SIZE {
+            window.store_mut().set(i, item(HERB));
+        }
+
+        let index = window.store().first_empty().unwrap();
+        window.reveal(index);
+
+        let slot = window.visible_slot(index).expect("revealed but not visible");
+        assert!(slot < BAG_SIZE, "slot {slot} is outside the bag");
+        assert_eq!(window.store_index(slot), Some(index));
+    }
+
+    #[test]
+    fn every_store_index_becomes_writable_once_revealed() {
+        let capacity = 16;
+        let mut window = Window::new(capacity);
+
+        for index in 0..capacity {
+            window.reveal(index);
+            let slot = window
+                .visible_slot(index)
+                .unwrap_or_else(|| panic!("index {index} not visible after reveal"));
+            assert!(slot < BAG_SIZE, "index {index} mapped to slot {slot}");
+        }
     }
 
     #[test]

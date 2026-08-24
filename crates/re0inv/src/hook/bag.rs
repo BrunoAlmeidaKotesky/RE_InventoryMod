@@ -12,11 +12,20 @@
 //!
 //! Getting this wrong does not fail loudly. It unbalances the caller's stack,
 //! and the crash lands somewhere unrelated, long after the real mistake.
+//!
+//! # Answering for a store the game cannot see
+//!
+//! These methods answer questions about a six-slot bag, and the answers to two
+//! of them are used as write targets. So a replacement may never return an
+//! index the game cannot address, however many slots the store behind it has.
+//! Where the store has room but the window does not show it, the window moves
+//! first and the answer names a slot that is now visible.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::core::logging::{log_debug, log_info, log_warn};
 use crate::game::inventory::{Bag, BAG_SIZE};
+use crate::store::registry;
 
 /// Calls logged per replacement before it goes quiet.
 ///
@@ -31,9 +40,6 @@ static COUNT_EMPTY_CALLS: AtomicUsize = AtomicUsize::new(0);
 static FIRST_EMPTY_CALLS: AtomicUsize = AtomicUsize::new(0);
 
 /// Logs the first few calls to a replacement, then stops.
-///
-/// Returns whether this call was logged, so the caller can build the message
-/// only when it will be used.
 fn should_log(calls: &AtomicUsize, name: &str) -> bool {
     let seen = calls.fetch_add(1, Ordering::Relaxed);
 
@@ -44,23 +50,11 @@ fn should_log(calls: &AtomicUsize, name: &str) -> bool {
     seen < LOG_LIMIT
 }
 
-/// Reads the bag the game passed, if it looks like a bag at all.
-///
-/// # Safety
-/// `bag` is whatever the game had in `ecx`. It is trusted only as far as being
-/// non-null and readable, which is all that can be checked from here.
-unsafe fn bag_ref<'a>(bag: *const Bag) -> Option<&'a Bag> {
-    if bag.is_null() {
-        return None;
-    }
-
-    // A misaligned pointer would mean we are not being called as a method at
+/// Checks the pointer the game put in `ecx` as far as is possible from here.
+fn is_usable(bag: *const Bag) -> bool {
+    // A misaligned or null pointer means we are not being called as a method at
     // all, which is worth knowing before dereferencing it.
-    if !(bag as usize).is_multiple_of(4) {
-        return None;
-    }
-
-    Some(&*bag)
+    !bag.is_null() && (bag as usize).is_multiple_of(4)
 }
 
 /// Entry stub for the game's "how many empty slots" method.
@@ -82,28 +76,27 @@ pub unsafe extern "C" fn count_empty_stub() {
     )
 }
 
-/// How many of the bag's slots are empty.
+/// How many empty slots the character has.
 ///
-/// This is a faithful reimplementation of what the game's own function does:
-/// walk the six slots, count the ones with item id zero. It exists to prove the
-/// detour and the calling convention are right before anything starts returning
-/// different answers than the game expects.
-extern "C" fn count_empty(bag: *const Bag) -> i32 {
+/// Counted across the whole store, not just the six the game can see. This is
+/// what makes a larger inventory real: the caller uses it to decide whether an
+/// item fits at all.
+extern "C" fn count_empty(bag: *mut Bag) -> i32 {
     let result = std::panic::catch_unwind(|| unsafe {
-        let Some(bag) = bag_ref(bag) else {
+        if !is_usable(bag) {
             log_warn!("count_empty called with an unusable pointer: {:?}", bag);
             return 0;
-        };
+        }
 
-        let empty = bag.items.iter().filter(|item| item.is_empty()).count() as i32;
+        let empty = registry::with_store(bag, |window| window.store().count_empty() as i32)
+            .unwrap_or_else(|| visible_empty_count(&*bag));
 
         if should_log(&COUNT_EMPTY_CALLS, "count_empty") {
             log_info!(
-                "count_empty(0x{:08X}) = {} of {}  [{}]",
-                bag as *const Bag as usize,
+                "count_empty(0x{:08X}) = {}  [{}]",
+                bag as usize,
                 empty,
-                BAG_SIZE,
-                describe(bag)
+                describe(&*bag)
             );
         }
 
@@ -133,30 +126,47 @@ pub unsafe extern "C" fn first_empty_stub() {
     )
 }
 
-/// Index of the bag's first empty slot, or `-1` when it is full.
+/// A slot the caller may write an item into, or `-1` if there is none.
 ///
-/// Another faithful reimplementation. This one is reached whenever the game
-/// puts any item into a bag, not only a two-slot one, which makes it the cheap
-/// way to prove the hooks are live.
-extern "C" fn first_empty(bag: *const Bag) -> i32 {
+/// The returned index is used directly as `bag->items[index]`, so it has to be
+/// one of the six the game has. When the store has room outside the window, the
+/// window moves onto it first and the index names its new visible position.
+///
+/// Two-slot items are not yet placed correctly here: they need two adjacent
+/// free slots starting on an even index, and this answers with the first free
+/// slot of any kind. The store's own repair pass fixes the alignment
+/// afterwards, but the placement should choose better to begin with.
+extern "C" fn first_empty(bag: *mut Bag) -> i32 {
     let result = std::panic::catch_unwind(|| unsafe {
-        let Some(bag) = bag_ref(bag) else {
+        if !is_usable(bag) {
             log_warn!("first_empty called with an unusable pointer: {:?}", bag);
             return NO_EMPTY_SLOT;
-        };
+        }
 
-        let found = bag
-            .items
-            .iter()
-            .position(|item| item.is_empty())
-            .map_or(NO_EMPTY_SLOT, |index| index as i32);
+        let found = registry::with_store(bag, |window| {
+            if let Some(slot) = window.first_visible_empty() {
+                return slot as i32;
+            }
+
+            // Nothing free in view. If the store has room elsewhere, bring it
+            // into view so the caller has somewhere legal to write.
+            let Some(index) = window.store().first_empty() else {
+                return NO_EMPTY_SLOT;
+            };
+
+            window.reveal(index);
+            window
+                .visible_slot(index)
+                .map_or(NO_EMPTY_SLOT, |slot| slot as i32)
+        })
+        .unwrap_or_else(|| visible_first_empty(&*bag));
 
         if should_log(&FIRST_EMPTY_CALLS, "first_empty") {
             log_info!(
                 "first_empty(0x{:08X}) = {}  [{}]",
-                bag as *const Bag as usize,
+                bag as usize,
                 found,
-                describe(bag)
+                describe(&*bag)
             );
         }
 
@@ -171,11 +181,32 @@ extern "C" fn first_empty(bag: *const Bag) -> i32 {
     })
 }
 
-/// The bag's item ids, for the log.
-fn describe(bag: &Bag) -> String {
+/// What the game's own code would have answered, ignoring the store.
+///
+/// Used when the store is unavailable. Falling back to the bag keeps the game
+/// correct-but-unmodded instead of feeding it an answer derived from something
+/// we could not read.
+fn visible_empty_count(bag: &Bag) -> i32 {
+    bag.items.iter().filter(|item| item.is_empty()).count() as i32
+}
+
+fn visible_first_empty(bag: &Bag) -> i32 {
     bag.items
         .iter()
-        .map(|item| item.id.to_string())
-        .collect::<Vec<_>>()
-        .join(" ")
+        .position(|item| item.is_empty())
+        .map_or(NO_EMPTY_SLOT, |index| index as i32)
+}
+
+/// The bag's item ids, for the log.
+fn describe(bag: &Bag) -> String {
+    let mut text = String::with_capacity(BAG_SIZE * 4);
+
+    for (i, item) in bag.items.iter().enumerate() {
+        if i > 0 {
+            text.push(' ');
+        }
+        text.push_str(&item.id.to_string());
+    }
+
+    text
 }
