@@ -15,6 +15,7 @@ use crate::win32::{
 };
 
 mod core;
+mod save;
 mod debug;
 mod feature;
 mod game;
@@ -141,6 +142,10 @@ fn startup() {
     install_hooks(detected.as_ref());
     install_features(detected.as_ref(), &config);
 
+    // Last, and always. Everything above only matters while the process is
+    // running; this is what stops the player losing it when they stop playing.
+    install_persistence(detected.as_ref(), &game_dir);
+
     log_info!("Initialization complete.");
 
     // Takes over this thread; nothing runs after it. It always runs, because
@@ -181,6 +186,25 @@ fn install_features(build: Option<&Build>, config: &Config) {
     };
 
     unsafe { feature::install_all(&addresses, config) };
+}
+
+/// Hooks saving and loading, so the extra slots outlive the process.
+///
+/// The file sits beside the game rather than inside the save. Nothing here can
+/// damage a save file, and that is the entire reason it was built this way.
+///
+/// This is not behind a switch. Turning the extra slots off while a save has
+/// items in them is exactly when the data has to be read and written back
+/// untouched, rather than quietly dropped.
+fn install_persistence(build: Option<&Build>, game_dir: &Path) {
+    let Some(addresses) = build.and_then(addresses::for_build) else {
+        log_warn!("No verified addresses for this build, so nothing will be saved or loaded.");
+        return;
+    };
+
+    let path = game_dir.join("re0inv_saves.bin");
+    let persistence = unsafe { save::Persistence::install(&addresses, path) };
+    save::keep(persistence);
 }
 
 fn log_module(module: &Module) {

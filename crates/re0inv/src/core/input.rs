@@ -260,6 +260,7 @@ fn dispatch_command(key: i32, ini: &Path, debug_keys: bool) {
         VK_F8 => unsafe {
             crate::hook::remove_all_installed();
             crate::feature::remove_all();
+            crate::save::remove_installed();
         },
         VK_F9 => probe::scan(ini),
         VK_F10 => probe::narrow(ini),

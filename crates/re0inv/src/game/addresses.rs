@@ -103,6 +103,16 @@ pub struct Addresses {
     /// `mov eax, [esi+0x60]; push 0` as the screen closes. Five bytes.
     pub inventory_menu_close: usize,
 
+    // --- Saving and loading ---
+
+    /// `imul edi, 0x1C850` where the game works out which slot it is saving to.
+    /// Six bytes, with the slot index in `edi`.
+    pub save_slot: usize,
+    /// `imul esi, 0x1C850`, the same on the load path, with the slot in `esi`.
+    pub load_slot: usize,
+    /// The first `call` of the routine that starts a new game. Five bytes.
+    pub new_game: usize,
+
     /// `__thiscall(manager, phase)` - puts the game into a screen. Phase 5 is
     /// the inventory and 6 is saving.
     pub set_room_phase: usize,
@@ -170,6 +180,10 @@ const JAN_2025: Addresses = Addresses {
     inventory_menu_start: 0x005E_1EF6,
     inventory_change_character: 0x005E_2F3A,
     inventory_menu_close: 0x005D_8D03,
+
+    save_slot: 0x0061_36D9,
+    load_slot: 0x0061_27E1,
+    new_game: 0x0041_240C,
 
     set_room_phase: 0x0061_0E00,
     prepare_inventory: 0x005D_7550,

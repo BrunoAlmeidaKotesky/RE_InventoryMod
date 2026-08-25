@@ -374,3 +374,48 @@ extern "C" fn note_typewriter() {
         }
     });
 }
+
+/// Everything the box holds, for writing to the side file.
+pub fn contents() -> Vec<Item> {
+    let Ok(mut storage) = STORAGE.lock() else {
+        return Vec::new();
+    };
+
+    let Some(storage) = storage.as_mut() else {
+        return Vec::new();
+    };
+
+    // Take in whatever the game left in the view first, or the last thing the
+    // player put in would not be in the file.
+    let bag = storage.read();
+    storage.window.read_from(&bag);
+
+    storage.window.store().as_slice().to_vec()
+}
+
+/// Replaces everything the box holds, from the side file or a new game.
+///
+/// The window goes back to the top: the contents just changed underneath it,
+/// and where it used to be means nothing now.
+pub fn set_contents(items: Vec<Item>) {
+    let Ok(mut storage) = STORAGE.lock() else {
+        return;
+    };
+
+    let Some(storage) = storage.as_mut() else {
+        return;
+    };
+
+    let capacity = storage.window.store().capacity();
+    let mut window = Window::new(capacity);
+
+    for (index, item) in items.iter().take(capacity).enumerate() {
+        window.store_mut().set(index, *item);
+    }
+
+    storage.window = window;
+
+    let mut bag = storage.read();
+    storage.window.write_into(&mut bag);
+    storage.write(&bag);
+}

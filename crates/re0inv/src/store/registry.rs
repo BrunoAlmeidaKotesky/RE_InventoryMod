@@ -237,6 +237,14 @@ pub unsafe fn view_for(owner: usize, offset: usize) -> *mut Bag {
         entry.reseed(&own);
     }
 
+    // A staged restore may be waiting whatever path led here: a reseed when a
+    // load overwrote the bag mid-session, a brand-new entry when the save was
+    // loaded straight from the main menu, or no visible change at all when the
+    // loaded six happen to equal what was already showing. It verifies itself
+    // against the game's bag, so offering it every time is safe — and offering
+    // it only after a reseed missed the main-menu path entirely.
+    apply_staged(entry, &own);
+
     entry.sync();
 
     // Keep the game's own bag showing what the view shows. Code that reaches it
@@ -321,6 +329,121 @@ pub fn positions() -> Vec<(usize, usize, usize, usize)> {
             .collect(),
         Err(_) => Vec::new(),
     }
+}
+
+// --- Surviving a save and a reload ---
+
+/// Every store as it stands, for writing to the side file.
+pub fn snapshot() -> Vec<(usize, usize, Vec<Item>)> {
+    let Ok(mut registry) = REGISTRY.lock() else {
+        return Vec::new();
+    };
+
+    registry
+        .entries
+        .iter_mut()
+        .map(|entry| {
+            // Take in whatever the game has written since the last accessor
+            // call, so what goes into the file is what the player has now.
+            let bag = entry.read_view();
+            entry.window.read_from(&bag);
+
+            (
+                entry.offset,
+                entry.window.position(),
+                entry.window.store().as_slice().to_vec(),
+            )
+        })
+        .collect()
+}
+
+/// What is waiting to be put back once the game has finished loading.
+///
+/// A load cannot be answered on the spot. The game copies the save into its own
+/// bags after the moment this mod hears about it, and whatever this mod wrote
+/// first would be overwritten. So the restore waits here, and is applied on the
+/// far side of the reseed that copy triggers.
+static PENDING: Mutex<Vec<Restore>> = Mutex::new(Vec::new());
+
+pub struct Restore {
+    pub offset: usize,
+    pub position: usize,
+    pub items: Vec<Item>,
+    /// The six the game should have restored, if this belongs to that save.
+    pub expected_visible: Vec<Item>,
+    /// Whether the mismatch has been logged, so waiting does not spam.
+    pub reported: bool,
+}
+
+/// Holds a restore until the game has loaded.
+pub fn stage(restores: Vec<Restore>) {
+    if let Ok(mut pending) = PENDING.lock() {
+        log_info!("{} store(s) staged for restoring after the load.", restores.len());
+        *pending = restores;
+    }
+}
+
+/// Drops anything staged, for a load that turned out not to happen.
+pub fn discard_staged() {
+    if let Ok(mut pending) = PENDING.lock() {
+        pending.clear();
+    }
+}
+
+/// Puts a staged store back, if this bag is one that was waiting for it.
+///
+/// Called from `view_for` on every pass while something is staged. It widens
+/// the store back to everything the side file recorded, but only once the six
+/// slots the game's bag holds agree with the six recorded alongside — that is
+/// what says the game has actually finished copying this save in.
+///
+/// A mismatch keeps the restore staged rather than dropping it. The bag may
+/// simply not have been written yet: the load hook runs before the game copies
+/// the slot, and an accessor can be called in between. A side file that truly
+/// belongs to another save never matches, stays quietly staged, and is thrown
+/// away by the next load or new game.
+fn apply_staged(entry: &mut Entry, restored: &Bag) -> bool {
+    let Ok(mut pending) = PENDING.lock() else {
+        return false;
+    };
+
+    let Some(index) = pending.iter().position(|r| r.offset == entry.offset) else {
+        return false;
+    };
+
+    let visible: Vec<Item> = restored.items.to_vec();
+
+    if visible != pending[index].expected_visible {
+        if !pending[index].reported {
+            pending[index].reported = true;
+            log_debug!(
+                "Bag +0x{:02X} does not match its side record yet; the restore stays staged.",
+                entry.offset
+            );
+        }
+        return false;
+    }
+
+    let restore = pending.remove(index);
+    drop(pending);
+
+    let capacity = entry.window.store().capacity();
+    let mut window = Window::new(capacity);
+
+    for (index, item) in restore.items.iter().take(capacity).enumerate() {
+        window.store_mut().set(index, *item);
+    }
+
+    window.set_position(restore.position);
+    entry.window = window;
+
+    log_info!(
+        "Bag +0x{:02X} restored to {} slots from the side file.",
+        entry.offset,
+        capacity
+    );
+
+    true
 }
 
 /// The items a store holds, for logging.
