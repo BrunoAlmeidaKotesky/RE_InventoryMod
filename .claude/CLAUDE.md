@@ -449,6 +449,23 @@ Incremental, testando in-game a cada passo:
   montado a partir de código de terceiro e leitura estática. O executável na máquina é a
   fonte da verdade. Corrigir aqui e seguir.
 
+## Custo de agentes
+
+Medido nesta sessão: fan-out de subagentes gastou 2,2M tokens, contra 5k do contexto
+fixo. É onde o orçamento vai, então é a única coisa que vale governar.
+
+- **Fan-out não é padrão.** Abrir vários agentes só quando o usuário pedir, ou quando um
+  erro já custou uma rodada de teste in-game dele. Fora isso, investigar direto.
+- **Trabalho mecânico vai em modelo barato.** Localizar chamador, conferir assinatura,
+  ler arquivo conhecido: `model: haiku`. Só análise que decide arquitetura merece o
+  modelo caro.
+- **Um lookup não é um agente.** Endereço, símbolo ou função que já se sabe onde está:
+  `grep`, ou o `analyzer` deste repo.
+- **Fan-out que valeu:** auditoria dos 30 patches do re0box (achou o bug do helper de
+  troca `0x004DDFC0`, que eu tinha errado sozinho duas vezes) e o code review da
+  persistência (achou perda de dados silenciosa). **Que não valeu:** 9 agentes para mapear
+  save/load — 8 morreram no limite e o resultado veio pela metade.
+
 ## Perguntas em aberto
 
 - Quantos slots é o alvo final? 8, 12, configurável?
