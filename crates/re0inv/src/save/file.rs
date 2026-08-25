@@ -102,6 +102,13 @@ impl SaveFile {
         self.slots.iter().find(|record| record.slot == slot)
     }
 
+    /// Takes one slot's record out, so its contents can be moved rather than
+    /// cloned.
+    pub fn take(&mut self, slot: u8) -> Option<SlotData> {
+        let index = self.slots.iter().position(|record| record.slot == slot)?;
+        Some(self.slots.swap_remove(index))
+    }
+
     /// Replaces one slot's record, adding it if it is new.
     pub fn put(&mut self, data: SlotData) {
         match self.slots.iter_mut().find(|record| record.slot == data.slot) {
@@ -110,22 +117,22 @@ impl SaveFile {
         }
     }
 
-    /// Forgets one slot, for a new game started over it.
-    #[allow(dead_code)] // A new game clears every slot, not one.
-    pub fn clear(&mut self, slot: u8) {
-        self.slots.retain(|record| record.slot != slot);
-    }
-
     pub fn encode(&self) -> Vec<u8> {
         let mut body = Vec::new();
 
         for record in &self.slots {
+            // The count is one byte, so what is written past it has to agree
+            // with it: a count that says 255 while the body holds more would
+            // decode the extras as the next record, which is garbage that
+            // passes the checksum.
+            let stores = &record.stores[..record.stores.len().min(u8::MAX as usize)];
+
             body.push(record.slot);
-            body.push(record.stores.len().min(u8::MAX as usize) as u8);
+            body.push(stores.len() as u8);
             put_u16(&mut body, record.box_items.len() as u16);
             put_items(&mut body, &record.box_items);
 
-            for store in &record.stores {
+            for store in stores {
                 put_u32(&mut body, store.offset);
                 put_u16(&mut body, store.position);
                 put_u16(&mut body, store.items.len() as u16);
@@ -164,6 +171,15 @@ impl SaveFile {
         let count = u32(bytes, 8) as usize;
         let expected_crc = u32(bytes, 12);
         let body = &bytes[HEADER..];
+
+        // The checksum covers the body, not this header field, so the count is
+        // still unverified input here. Handing it to `with_capacity` unchecked
+        // lets sixteen corrupt bytes request gigabytes, and a failed allocation
+        // is an abort no catch_unwind can turn into a log line. The smallest a
+        // record can be is four bytes, which bounds any honest count.
+        if count > body.len() / 4 {
+            return Err(format!("{count} records cannot fit in {} bytes", body.len()));
+        }
 
         let actual = crc32(body);
         if actual != expected_crc {
@@ -370,12 +386,22 @@ mod tests {
     }
 
     #[test]
-    fn clear_forgets_only_that_slot() {
+    fn take_removes_and_returns_the_record() {
         let mut file = sample();
-        file.clear(3);
+        let taken = file.take(3);
 
+        assert_eq!(taken, sample().get(3).cloned());
         assert!(file.get(3).is_none());
         assert!(file.get(7).is_some());
+    }
+
+    #[test]
+    fn rejects_a_count_larger_than_the_body() {
+        let mut encoded = sample().encode();
+        // The record count lives at offset 8, outside the checksum.
+        encoded[8..12].copy_from_slice(&0x0800_0000u32.to_le_bytes());
+
+        assert!(SaveFile::decode(&encoded).is_err());
     }
 
     #[test]

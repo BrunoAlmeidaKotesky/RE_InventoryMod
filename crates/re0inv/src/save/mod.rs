@@ -38,10 +38,11 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use crate::core::logging::{log_info, log_warn};
 use crate::game::addresses::Addresses;
-use crate::game::inventory::BAG_SIZE;
+use crate::game::inventory::{Item, BAG_SIZE};
 use crate::hook::patch::Patch;
 use crate::store::registry::{self, Restore};
 
@@ -51,8 +52,6 @@ use file::{SaveFile, SlotData, StoreData};
 
 /// Highest save slot the game has.
 const SAVE_SLOTS: u32 = 20;
-
-const NOP: u8 = 0x90;
 
 /// `imul edi, 0x1C850` — the save path's slot arithmetic.
 const SAVE_SLOT_SIZE: [u8; 6] = [0x69, 0xFF, 0x50, 0xC8, 0x01, 0x00];
@@ -73,13 +72,6 @@ pub struct Persistence {
 /// The installed hooks, kept because the bytes they replaced live inside.
 static INSTALLED: Mutex<Option<Persistence>> = Mutex::new(None);
 
-/// Stores the installed hooks so the debug removal path can find them.
-pub fn keep(persistence: Persistence) {
-    if let Ok(mut installed) = INSTALLED.lock() {
-        *installed = Some(persistence);
-    }
-}
-
 /// Puts back the bytes the save hooks replaced.
 ///
 /// # Safety
@@ -97,10 +89,16 @@ pub unsafe fn remove_installed() {
 }
 
 impl Persistence {
+    /// Installs the hooks and registers them for removal in one step, so an
+    /// installed-but-unregistered state cannot exist.
+    ///
+    /// `code` is the game's code section; a patch target outside it belongs to
+    /// someone else.
+    ///
     /// # Safety
     /// The addresses must belong to the build actually running, and the code
     /// section must be decrypted.
-    pub unsafe fn install(addresses: &Addresses, path: PathBuf) -> Persistence {
+    pub unsafe fn install(addresses: &Addresses, path: PathBuf, code: std::ops::Range<usize>) {
         if let Ok(mut slot) = PATH.lock() {
             *slot = Some(path.clone());
         }
@@ -110,7 +108,7 @@ impl Persistence {
         SAVE_CONTINUE.store(addresses.save_slot + SAVE_SLOT_SIZE.len(), Ordering::Relaxed);
         LOAD_CONTINUE.store(addresses.load_slot + LOAD_SLOT_SIZE.len(), Ordering::Relaxed);
 
-        jump_over(
+        crate::hook::detour::jump_over(
             &mut patches,
             "saving a slot",
             addresses.save_slot,
@@ -118,7 +116,7 @@ impl Persistence {
             save_stub as unsafe extern "C" fn() as usize,
         );
 
-        jump_over(
+        crate::hook::detour::jump_over(
             &mut patches,
             "loading a slot",
             addresses.load_slot,
@@ -126,11 +124,13 @@ impl Persistence {
             load_stub as unsafe extern "C" fn() as usize,
         );
 
-        install_new_game(addresses, &mut patches);
+        install_new_game(addresses, &mut patches, code);
 
         log_info!("Persistence: {} patch(es) applied, file {}.", patches.len(), path.display());
 
-        Persistence { patches }
+        if let Ok(mut installed) = INSTALLED.lock() {
+            *installed = Some(Persistence { patches });
+        }
     }
 
     /// # Safety
@@ -143,11 +143,24 @@ impl Persistence {
     }
 }
 
-unsafe fn install_new_game(addresses: &Addresses, patches: &mut Vec<Patch>) {
+unsafe fn install_new_game(addresses: &Addresses, patches: &mut Vec<Patch>, code: std::ops::Range<usize>) {
     let Some(target) = crate::hook::detour::call_target(addresses.new_game) else {
         log_warn!("New game does not start with a call where expected.");
         return;
     };
+
+    // Reading the target back means any call instruction passes the byte
+    // check, including one another mod already redirected out of the module.
+    // Chaining into a stranger's stub works right up until they unload, and
+    // then a new game jumps into freed memory. Outside the code section means
+    // it is not the game's own function, and this site is skipped.
+    if !code.contains(&target) {
+        log_warn!(
+            "New game already redirected outside the game's code (0x{target:08X}); \
+             leaving that site alone."
+        );
+        return;
+    }
 
     NEW_GAME.store(target, Ordering::Relaxed);
 
@@ -163,76 +176,43 @@ unsafe fn install_new_game(addresses: &Addresses, patches: &mut Vec<Patch>) {
     }
 }
 
-unsafe fn jump_over(
-    patches: &mut Vec<Patch>,
-    what: &str,
-    at: usize,
-    expected: &[u8],
-    handler: usize,
-) {
-    let Some(jump) = crate::hook::detour::jump_bytes(at, handler) else {
-        log_warn!("Persistence: could not build the jump for {what}.");
-        return;
-    };
-
-    let mut bytes = vec![NOP; expected.len()];
-    bytes[..jump.len()].copy_from_slice(&jump);
-
-    match Patch::write_expecting(at, expected, &bytes) {
-        Some(patch) => patches.push(patch),
-        None => log_warn!("Persistence: {what} is not the instruction expected."),
-    }
-}
-
 // --- The trampolines ---
 
-/// Runs where the game works out which slot it is saving to.
-///
-/// # Safety
-/// Reached only through the jump written over that instruction, so `edi` holds
-/// the slot index. The instruction is re-executed here.
-#[unsafe(naked)]
-unsafe extern "C" fn save_stub() {
-    core::arch::naked_asm!(
-        "pushad",
-        // Aligned like the other watchers: the handler does real work — file
-        // writes, allocation — and compiled Rust may use SSE on any of it.
-        "mov ebp, esp",
-        "and esp, -16",
-        "sub esp, 16",
-        "mov [esp], edi",
-        "call {saving}",
-        "mov esp, ebp",
-        "popad",
-        "imul edi, 0x1C850",
-        "jmp dword ptr [{continue_at}]",
-        saving = sym on_save,
-        continue_at = sym SAVE_CONTINUE,
-    )
+/// The save and load stubs differ only in which register holds the slot and
+/// which handler hears about it.
+macro_rules! slot_stub {
+    ($name:ident, $register:tt, $handler:ident, $continue_at:ident) => {
+        /// Runs where the game works out where a save slot lives.
+        ///
+        /// # Safety
+        /// Reached only through the jump written over the `imul`, so the named
+        /// register holds the slot index. The `imul` is re-executed at the end,
+        /// which also recreates the flag state the original left behind.
+        #[unsafe(naked)]
+        unsafe extern "C" fn $name() {
+            core::arch::naked_asm!(
+                "pushad",
+                // Aligned like the other watchers: the handler does real work —
+                // file access, allocation — and compiled Rust may use SSE on
+                // any of it.
+                "mov ebp, esp",
+                "and esp, -16",
+                "sub esp, 16",
+                concat!("mov [esp], ", stringify!($register)),
+                "call {handler}",
+                "mov esp, ebp",
+                "popad",
+                concat!("imul ", stringify!($register), ", 0x1C850"),
+                "jmp dword ptr [{continue_at}]",
+                handler = sym $handler,
+                continue_at = sym $continue_at,
+            )
+        }
+    };
 }
 
-/// Runs where the game works out which slot it is loading from.
-///
-/// # Safety
-/// Reached only through the jump written over that instruction, so `esi` holds
-/// the slot index. The instruction is re-executed here.
-#[unsafe(naked)]
-unsafe extern "C" fn load_stub() {
-    core::arch::naked_asm!(
-        "pushad",
-        "mov ebp, esp",
-        "and esp, -16",
-        "sub esp, 16",
-        "mov [esp], esi",
-        "call {loading}",
-        "mov esp, ebp",
-        "popad",
-        "imul esi, 0x1C850",
-        "jmp dword ptr [{continue_at}]",
-        loading = sym on_load,
-        continue_at = sym LOAD_CONTINUE,
-    )
-}
+slot_stub!(save_stub, edi, on_save, SAVE_CONTINUE);
+slot_stub!(load_stub, esi, on_load, LOAD_CONTINUE);
 
 /// Runs when a new game begins.
 ///
@@ -269,9 +249,30 @@ extern "C" fn on_save(slot: u32) {
             })
             .collect();
 
+        let mut current = read_file();
+
+        // What the live session does not own is carried forward, never
+        // replaced. With the box switched off there is no box to ask, and
+        // recording the resulting nothing would erase what a previous session
+        // stored — turning a feature off must not cost the player its
+        // contents. The same goes for the stores if none are registered.
+        let previous = current.get(slot as u8);
+
+        let box_items = if crate::feature::item_box::exists() {
+            crate::feature::item_box::contents()
+        } else {
+            previous.map(|p| p.box_items.clone()).unwrap_or_default()
+        };
+
+        let stores = if stores.is_empty() {
+            previous.map(|p| p.stores.clone()).unwrap_or_default()
+        } else {
+            stores
+        };
+
         let data = SlotData {
             slot: slot as u8,
-            box_items: crate::feature::item_box::contents(),
+            box_items,
             stores,
         };
 
@@ -282,7 +283,6 @@ extern "C" fn on_save(slot: u32) {
             data.stores.len()
         );
 
-        let mut current = read_file();
         current.put(data);
         write_file(&current);
     });
@@ -291,6 +291,7 @@ extern "C" fn on_save(slot: u32) {
 extern "C" fn on_load(slot: u32) {
     let _ = std::panic::catch_unwind(|| {
         registry::discard_staged();
+        discard_staged_box();
 
         // Everything registered so far belongs to the session being replaced.
         // The owners are heap addresses that may be dead after the load, and a
@@ -299,45 +300,114 @@ extern "C" fn on_load(slot: u32) {
         // staged restore below as they do.
         registry::forget_all();
 
+        // Whatever the box held belongs to the session being replaced too. If
+        // this save has box contents recorded, they arrive through the staging
+        // below; if not, empty is the honest answer.
+        crate::feature::item_box::set_contents(Vec::new());
+
         if slot >= SAVE_SLOTS {
             return;
         }
 
-        let file = read_file();
+        let mut file = read_file();
 
-        let Some(data) = file.get(slot as u8) else {
+        let Some(data) = file.take(slot as u8) else {
             log_info!("Slot {slot} has nothing recorded beside it; loading as the game saved it.");
-            crate::feature::item_box::set_contents(Vec::new());
             return;
         };
-
-        crate::feature::item_box::set_contents(data.box_items.clone());
-
-        let restores: Vec<Restore> = data
-            .stores
-            .iter()
-            .map(|store| Restore {
-                offset: store.offset as usize,
-                position: store.position as usize,
-                items: store.items.clone(),
-                expected_visible: store.visible(BAG_SIZE),
-                reported: false,
-            })
-            .collect();
 
         log_info!(
             "Loading slot {slot}: {} in the box, {} bag(s) to widen.",
             data.box_items.len(),
-            restores.len()
+            data.stores.len()
         );
 
+        let restores: Vec<Restore> = data
+            .stores
+            .into_iter()
+            .map(|store| Restore {
+                expected_visible: store.visible(BAG_SIZE),
+                offset: store.offset as usize,
+                position: store.position as usize,
+                items: store.items,
+            })
+            .collect();
+
         registry::stage(restores);
+        stage_box(data.box_items);
     });
+}
+
+// --- The box's contents wait for the bags to vouch for the file ---
+
+/// Box contents read from the side file, waiting for confirmation.
+///
+/// The bags can be verified: the game restores their six visible slots, and
+/// the side record carries the same six for comparison. The box has no
+/// counterpart inside the game, so on its own a record could be from any
+/// session — a save rolled back from a backup, a slot overwritten with the mod
+/// removed. It is trusted exactly as far as the bags are: only once a bag
+/// restore has matched the loaded save do these reach the box.
+static STAGED_BOX: Mutex<Option<(Vec<Item>, Instant)>> = Mutex::new(None);
+
+/// How long the box waits for a bag to vouch. Mirrors the registry's own
+/// staging lifetime.
+const BOX_LIFETIME: Duration = Duration::from_secs(60);
+
+fn stage_box(items: Vec<Item>) {
+    if items.is_empty() {
+        return;
+    }
+
+    if let Ok(mut staged) = STAGED_BOX.lock() {
+        *staged = Some((items, Instant::now()));
+    }
+}
+
+fn discard_staged_box() {
+    if let Ok(mut staged) = STAGED_BOX.lock() {
+        *staged = None;
+    }
+}
+
+/// Applies the staged box contents once the bags have vouched for the file.
+///
+/// Polled from the input thread. Doing nothing is the common case and costs a
+/// lock on a `None`.
+pub fn settle() {
+    let Ok(mut staged) = STAGED_BOX.lock() else {
+        return;
+    };
+
+    let Some((_, since)) = staged.as_ref() else {
+        return;
+    };
+
+    if since.elapsed() > BOX_LIFETIME {
+        if let Some((items, _)) = staged.take() {
+            log_warn!(
+                "No bag matched the loaded save, so the {} item(s) recorded for the box \
+                 were not restored.",
+                items.len()
+            );
+        }
+        return;
+    }
+
+    if !registry::restore_matched() {
+        return;
+    }
+
+    if let Some((items, _)) = staged.take() {
+        log_info!("The box's {} item(s) restored from the side file.", items.len());
+        crate::feature::item_box::set_contents(items);
+    }
 }
 
 extern "C" fn on_new_game() {
     let _ = std::panic::catch_unwind(|| {
         registry::discard_staged();
+        discard_staged_box();
         registry::forget_all();
         crate::feature::item_box::set_contents(Vec::new());
         log_info!("New game: the box and the extra slots start empty.");
@@ -359,7 +429,18 @@ fn read_file() -> SaveFile {
     match SaveFile::decode(&bytes) {
         Ok(file) => file,
         Err(e) => {
-            log_warn!("Ignoring {}: {e}.", path.display());
+            // Starting over from empty is unavoidable, but quietly rewriting
+            // the file on the next save would erase every slot's record over
+            // one bad byte. Moved aside instead, so the bytes survive for a
+            // rescue by hand.
+            let quarantine = path.with_extension("bad");
+            log_warn!("Cannot read {}: {e}.", path.display());
+
+            match std::fs::rename(&path, &quarantine) {
+                Ok(()) => log_warn!("Moved aside as {}.", quarantine.display()),
+                Err(e) => log_warn!("Could not move it aside: {e}."),
+            }
+
             SaveFile::default()
         }
     }

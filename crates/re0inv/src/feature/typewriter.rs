@@ -59,8 +59,6 @@ const SET_SILENT: [u8; 7] = [0xC7, 0x47, 0x10, 0x00, 0x00, 0x00, 0x00];
 /// `cmp dword ptr [esp+0x60], 1`.
 const COMPARE_CHOICE: [u8; 5] = [0x83, 0x7C, 0x24, 0x60, 0x01];
 
-const NOP: u8 = 0x90;
-
 /// Whether the player had an ink ribbon when the prompt was shown.
 static HAD_RIBBON: AtomicBool = AtomicBool::new(false);
 /// Set when the answer was "open the box", read one call later.
@@ -92,7 +90,7 @@ impl Typewriter {
         PREPARE_INVENTORY.store(addresses.prepare_inventory, Ordering::Relaxed);
         INVENTORY_HOLDER.store(addresses.inventory_holder, Ordering::Relaxed);
 
-        jump_over(
+        crate::hook::detour::jump_over(
             &mut patches,
             "prompt with a ribbon",
             addresses.typewriter_has_ribbon,
@@ -100,7 +98,7 @@ impl Typewriter {
             had_ribbon_stub as unsafe extern "C" fn() as usize,
         );
 
-        jump_over(
+        crate::hook::detour::jump_over(
             &mut patches,
             "prompt without a ribbon",
             addresses.typewriter_no_ribbon,
@@ -149,25 +147,6 @@ impl Typewriter {
         }
         self.patches.clear();
     }
-}
-
-/// Replaces an instruction with a jump, padding whatever is left with `nop`.
-unsafe fn jump_over(
-    patches: &mut Vec<Patch>,
-    what: &str,
-    at: usize,
-    expected: &[u8],
-    handler: usize,
-) {
-    let Some(jump) = crate::hook::detour::jump_bytes(at, handler) else {
-        log_warn!("Typewriter: could not build the jump for {what}.");
-        return;
-    };
-
-    let mut bytes = vec![NOP; expected.len()];
-    bytes[..jump.len()].copy_from_slice(&jump);
-
-    push(patches, what, Patch::write_expecting(at, expected, &bytes));
 }
 
 /// Replaces a five-byte instruction with a call to our own code.

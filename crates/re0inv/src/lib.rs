@@ -144,7 +144,7 @@ fn startup() {
 
     // Last, and always. Everything above only matters while the process is
     // running; this is what stops the player losing it when they stop playing.
-    install_persistence(detected.as_ref(), &game_dir);
+    install_persistence(detected.as_ref(), &game_dir, code.start..code.end());
 
     log_info!("Initialization complete.");
 
@@ -196,15 +196,14 @@ fn install_features(build: Option<&Build>, config: &Config) {
 /// This is not behind a switch. Turning the extra slots off while a save has
 /// items in them is exactly when the data has to be read and written back
 /// untouched, rather than quietly dropped.
-fn install_persistence(build: Option<&Build>, game_dir: &Path) {
+fn install_persistence(build: Option<&Build>, game_dir: &Path, code: std::ops::Range<usize>) {
     let Some(addresses) = build.and_then(addresses::for_build) else {
         log_warn!("No verified addresses for this build, so nothing will be saved or loaded.");
         return;
     };
 
     let path = game_dir.join("re0inv_saves.bin");
-    let persistence = unsafe { save::Persistence::install(&addresses, path) };
-    save::keep(persistence);
+    unsafe { save::Persistence::install(&addresses, path, code) };
 }
 
 fn log_module(module: &Module) {

@@ -567,3 +567,29 @@ in this build, not from any other mod:
 `0x1C850` is the per-slot stride, and the slot count comes from a `cmp esi, 0x13`
 bound. The arithmetic closes exactly, which is good evidence but not the same as
 having parsed the file.
+
+## Save and load patch sites
+
+Verified in the runtime dump on 2026-08-25, and identical to the sites the
+re0box reference table lists for this build.
+
+| Address | Instruction | Meaning |
+|---|---|---|
+| `0x006136D9` | `imul edi, 0x1C850` | saving: `edi` holds the slot index |
+| `0x006127E1` | `imul esi, 0x1C850` | loading: `esi` holds the slot index |
+| `0x0041240C` | `call 0x004112B0` | first call of the new-game routine |
+
+Confirmation: a pattern search for `69 ?? 50 C8 01 00` (`imul reg, 0x1C850`)
+finds fifteen sites in eight functions; these two are the ones inside the
+functions at `0x006136D0` (save) and `0x006127D0` (load), each reached with the
+slot still un-multiplied in its register. The stride times twenty slots plus
+the header is exactly the 2337008 bytes of a vanilla save.
+
+Both `imul` sites are six bytes and are replaced by a five-byte jump plus one
+`nop`; the trampolines re-execute the `imul`, which also recreates its flag
+state. The new-game site is a five-byte call replaced by an equal-length call;
+the original target is read from the instruction, and is only trusted when it
+lies inside the game's code section.
+
+The mod's own data goes to `re0inv_saves.bin` beside the executable — the
+game's `data0.bin` is never written.

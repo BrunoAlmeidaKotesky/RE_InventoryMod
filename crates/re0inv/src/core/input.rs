@@ -163,6 +163,10 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
         }
         box_was_down = show_box;
 
+        // Hands the box its contents from the side file once a bag restore has
+        // vouched for it. Almost always a no-op.
+        crate::save::settle();
+
         std::thread::sleep(POLL_INTERVAL);
     }
 }

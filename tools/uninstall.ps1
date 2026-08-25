@@ -29,10 +29,39 @@ if (-not (Test-Path $manifestPath)) {
     foreach ($p in $known) {
         if (Test-Path $p) { Remove-Item $p -Force; Write-Host "Removed: $p" }
     }
+
+    # Player data: backed up before removal, same as the manifest path below.
+    foreach ($name in @('re0inv_saves.bin', 're0inv_saves.tmp', 're0inv_saves.bad')) {
+        $sideFile = Join-Path $GameDir $name
+        if (Test-Path $sideFile) {
+            $stamp = Get-Date -Format 'yyyy-MM-dd_HHmmss'
+            $dest = Join-Path $repo "backups\saves\$stamp"
+            New-Item -ItemType Directory -Force -Path $dest | Out-Null
+            Copy-Item $sideFile $dest
+            Remove-Item $sideFile -Force
+            Write-Host "Mod save data backed up to $dest and removed: $name" -ForegroundColor Green
+        }
+    }
     return
 }
 
 $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+
+# The side file holds the player's extra slots and item box. It is player data,
+# not an install artifact, so it is backed up and then removed - never plainly
+# deleted, and never left behind to confuse a future install.
+$gameDirFromManifest = $manifest.GameDir
+foreach ($name in @('re0inv_saves.bin', 're0inv_saves.tmp', 're0inv_saves.bad')) {
+    $sideFile = Join-Path $gameDirFromManifest $name
+    if (Test-Path $sideFile) {
+        $stamp = Get-Date -Format 'yyyy-MM-dd_HHmmss'
+        $dest = Join-Path $repo "backups\saves\$stamp"
+        New-Item -ItemType Directory -Force -Path $dest | Out-Null
+        Copy-Item $sideFile $dest
+        Remove-Item $sideFile -Force
+        Write-Host "Mod save data backed up to $dest and removed: $name" -ForegroundColor Green
+    }
+}
 
 foreach ($path in $manifest.Created) {
     if (Test-Path $path) {

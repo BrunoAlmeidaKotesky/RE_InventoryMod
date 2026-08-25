@@ -181,7 +181,7 @@ pub fn enable(capacity: usize) {
     }
 }
 
-fn exists() -> bool {
+pub fn exists() -> bool {
     STORAGE.lock().map(|s| s.is_some()).unwrap_or(false)
 }
 
@@ -407,13 +407,18 @@ pub fn set_contents(items: Vec<Item>) {
     };
 
     let capacity = storage.window.store().capacity();
-    let mut window = Window::new(capacity);
 
-    for (index, item) in items.iter().take(capacity).enumerate() {
-        window.store_mut().set(index, *item);
+    if items.len() > capacity {
+        log_warn!(
+            "The box's record holds {} items but {capacity} slots are configured; \
+             keeping every item.",
+            items.len()
+        );
     }
 
-    storage.window = window;
+    // Grows to fit rather than truncating: a shrunk configuration is not a
+    // licence to delete what a previous session stored.
+    storage.window = Window::with_items(capacity, &items, 0);
 
     let mut bag = storage.read();
     storage.window.write_into(&mut bag);

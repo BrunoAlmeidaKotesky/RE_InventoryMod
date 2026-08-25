@@ -21,9 +21,11 @@
 //! still at store index `position + k`, because the window only moves while we
 //! hold it.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
-use crate::core::logging::{log_debug, log_info};
+use crate::core::logging::{log_debug, log_info, log_warn};
 use crate::game::inventory::{Bag, Item, BAG_SIZE};
 use crate::store::window::Window;
 
@@ -363,7 +365,24 @@ pub fn snapshot() -> Vec<(usize, usize, Vec<Item>)> {
 /// bags after the moment this mod hears about it, and whatever this mod wrote
 /// first would be overwritten. So the restore waits here, and is applied on the
 /// far side of the reseed that copy triggers.
-static PENDING: Mutex<Vec<Restore>> = Mutex::new(Vec::new());
+static PENDING: Mutex<Vec<Staged>> = Mutex::new(Vec::new());
+
+/// Whether `PENDING` might hold anything, so the accessor path can skip the
+/// lock entirely. The accessor runs at least once per drawn frame for the whole
+/// session, and something is staged for seconds after a load at most.
+static PENDING_ANY: AtomicBool = AtomicBool::new(false);
+
+/// Set when a staged restore has matched the game's bag since the last load.
+/// The save module reads this to decide the side file belongs to this save.
+static MATCHED: AtomicBool = AtomicBool::new(false);
+
+/// How long a staged restore waits for the game's bag to match it.
+///
+/// The gap being bridged is the game copying the save into its bags, which
+/// takes a loading screen. A record that has not matched by the end of this is
+/// from some other save, and holding it longer only gives it chances to match
+/// the live inventory by coincidence and overwrite it with stale items.
+const STAGED_LIFETIME: Duration = Duration::from_secs(60);
 
 pub struct Restore {
     pub offset: usize,
@@ -371,15 +390,33 @@ pub struct Restore {
     pub items: Vec<Item>,
     /// The six the game should have restored, if this belongs to that save.
     pub expected_visible: Vec<Item>,
-    /// Whether the mismatch has been logged, so waiting does not spam.
-    pub reported: bool,
+}
+
+/// One staged restore, and what has happened to it so far.
+struct Staged {
+    restore: Restore,
+    since: Instant,
+    /// Applied once already. Kept rather than removed: an application before
+    /// the game finished copying the save in is overwritten by the reseed that
+    /// copy causes, and the answer to that is applying again, not having
+    /// consumed the record.
+    applied: bool,
 }
 
 /// Holds a restore until the game has loaded.
 pub fn stage(restores: Vec<Restore>) {
     if let Ok(mut pending) = PENDING.lock() {
         log_info!("{} store(s) staged for restoring after the load.", restores.len());
-        *pending = restores;
+        MATCHED.store(false, Ordering::Relaxed);
+        *pending = restores
+            .into_iter()
+            .map(|restore| Staged {
+                restore,
+                since: Instant::now(),
+                applied: false,
+            })
+            .collect();
+        PENDING_ANY.store(!pending.is_empty(), Ordering::Release);
     }
 }
 
@@ -387,7 +424,18 @@ pub fn stage(restores: Vec<Restore>) {
 pub fn discard_staged() {
     if let Ok(mut pending) = PENDING.lock() {
         pending.clear();
+        PENDING_ANY.store(false, Ordering::Release);
+        MATCHED.store(false, Ordering::Relaxed);
     }
+}
+
+/// Whether a staged restore has matched the loaded save yet.
+///
+/// This is the signal that the side file describes the save actually loaded.
+/// The box's contents ride on it: they have no bag in the game to be verified
+/// against, so they are trusted exactly as far as the bags that do.
+pub fn restore_matched() -> bool {
+    MATCHED.load(Ordering::Relaxed)
 }
 
 /// Puts a staged store back, if this bag is one that was waiting for it.
@@ -397,53 +445,82 @@ pub fn discard_staged() {
 /// slots the game's bag holds agree with the six recorded alongside — that is
 /// what says the game has actually finished copying this save in.
 ///
-/// A mismatch keeps the restore staged rather than dropping it. The bag may
-/// simply not have been written yet: the load hook runs before the game copies
-/// the slot, and an accessor can be called in between. A side file that truly
-/// belongs to another save never matches, stays quietly staged, and is thrown
-/// away by the next load or new game.
-fn apply_staged(entry: &mut Entry, restored: &Bag) -> bool {
+/// Three deliberate choices, each covering a failure that was found by review
+/// rather than in play:
+///
+/// - Every candidate at this offset is tried, not just the first. A file can
+///   hold two records for `+0x20`, and the stale one must not shadow the live
+///   one.
+/// - A restore that matches is applied but kept. The match can happen *before*
+///   the game copies the save in — the load hook runs early, and six empty
+///   slots match six empty slots — and the copy then reseeds the store,
+///   undoing the application. The kept record matches again afterwards, and
+///   the second application is the one that lasts.
+/// - Everything staged expires after `STAGED_LIFETIME`. A record from some
+///   other save never matches during the load, but the live inventory drifts,
+///   and given forever it would eventually coincide — and be overwritten with
+///   stale items mid-session.
+fn apply_staged(entry: &mut Entry, restored: &Bag) {
+    if !PENDING_ANY.load(Ordering::Acquire) {
+        return;
+    }
+
     let Ok(mut pending) = PENDING.lock() else {
-        return false;
+        return;
     };
 
-    let Some(index) = pending.iter().position(|r| r.offset == entry.offset) else {
-        return false;
-    };
+    pending.retain(|staged| {
+        let keep = staged.since.elapsed() < STAGED_LIFETIME;
 
-    let visible: Vec<Item> = restored.items.to_vec();
-
-    if visible != pending[index].expected_visible {
-        if !pending[index].reported {
-            pending[index].reported = true;
-            log_debug!(
-                "Bag +0x{:02X} does not match its side record yet; the restore stays staged.",
-                entry.offset
+        if !keep && !staged.applied {
+            log_warn!(
+                "The side record for bag +0x{:02X} never matched the loaded save; \
+                 its {} item(s) were not restored.",
+                staged.restore.offset,
+                staged.restore.items.len()
             );
         }
-        return false;
+
+        keep
+    });
+
+    for staged in pending
+        .iter_mut()
+        .filter(|staged| staged.restore.offset == entry.offset)
+    {
+        if staged.restore.expected_visible[..] != restored.items[..] {
+            continue;
+        }
+
+        let configured = entry.window.store().capacity();
+        let restore = &staged.restore;
+
+        if restore.items.len() > configured {
+            log_warn!(
+                "The record for bag +0x{:02X} holds {} items but {} slots are configured; \
+                 keeping every item.",
+                restore.offset,
+                restore.items.len(),
+                configured
+            );
+        }
+
+        entry.window = Window::with_items(configured, &restore.items, restore.position);
+
+        if !staged.applied {
+            staged.applied = true;
+            log_info!(
+                "Bag +0x{:02X} restored to {} slots from the side file.",
+                restore.offset,
+                entry.window.store().capacity()
+            );
+        }
+
+        MATCHED.store(true, Ordering::Relaxed);
+        break;
     }
 
-    let restore = pending.remove(index);
-    drop(pending);
-
-    let capacity = entry.window.store().capacity();
-    let mut window = Window::new(capacity);
-
-    for (index, item) in restore.items.iter().take(capacity).enumerate() {
-        window.store_mut().set(index, *item);
-    }
-
-    window.set_position(restore.position);
-    entry.window = window;
-
-    log_info!(
-        "Bag +0x{:02X} restored to {} slots from the side file.",
-        entry.offset,
-        capacity
-    );
-
-    true
+    PENDING_ANY.store(!pending.is_empty(), Ordering::Release);
 }
 
 /// The items a store holds, for logging.

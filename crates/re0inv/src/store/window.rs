@@ -37,6 +37,23 @@ impl Window {
         }
     }
 
+    /// A window over the given items, at the given position.
+    ///
+    /// The capacity grows to fit the items rather than truncating them. The
+    /// items come from a file recording what the player owned; a configuration
+    /// that shrank since then is not a licence to delete things, and a larger
+    /// window is the only answer that keeps everything.
+    pub fn with_items(capacity: usize, items: &[Item], position: usize) -> Window {
+        let mut window = Window::new(capacity.max(items.len()));
+
+        for (index, item) in items.iter().enumerate() {
+            window.store.set(index, *item);
+        }
+
+        window.set_position(position);
+        window
+    }
+
     /// Store index of the equipped item.
     pub fn equipped(&self) -> Option<usize> {
         self.equipped

@@ -35,8 +35,6 @@ use crate::game::addresses::Addresses;
 use crate::hook::panel;
 use crate::hook::patch::Patch;
 
-const NOP: u8 = 0x90;
-
 /// `inc dword ptr [edi+0x294]`.
 const BUMP_PHASE: [u8; 6] = [0xFF, 0x87, 0x94, 0x02, 0x00, 0x00];
 /// `cmp byte ptr [edi+0x2CA], 1`.
@@ -78,7 +76,7 @@ impl Menu {
 
         install_animation(addresses, &mut patches);
 
-        jump_over(
+        crate::hook::detour::jump_over(
             &mut patches,
             "the screen finishing its setup",
             addresses.inventory_menu_start,
@@ -86,7 +84,7 @@ impl Menu {
             start_stub as unsafe extern "C" fn() as usize,
         );
 
-        jump_over(
+        crate::hook::detour::jump_over(
             &mut patches,
             "the played character changing",
             addresses.inventory_change_character,
@@ -94,7 +92,7 @@ impl Menu {
             change_stub as unsafe extern "C" fn() as usize,
         );
 
-        jump_over(
+        crate::hook::detour::jump_over(
             &mut patches,
             "the screen closing",
             addresses.inventory_menu_close,
@@ -147,27 +145,6 @@ unsafe fn install_animation(addresses: &Addresses, patches: &mut Vec<Patch>) {
     match Patch::write_expecting(addresses.inventory_open_animation, &expected, &bytes) {
         Some(patch) => patches.push(patch),
         None => log_warn!("Could not redirect the opening animation."),
-    }
-}
-
-unsafe fn jump_over(
-    patches: &mut Vec<Patch>,
-    what: &str,
-    at: usize,
-    expected: &[u8],
-    handler: usize,
-) {
-    let Some(jump) = crate::hook::detour::jump_bytes(at, handler) else {
-        log_warn!("Inventory screen: could not build the jump for {what}.");
-        return;
-    };
-
-    let mut bytes = vec![NOP; expected.len()];
-    bytes[..jump.len()].copy_from_slice(&jump);
-
-    match Patch::write_expecting(at, expected, &bytes) {
-        Some(patch) => patches.push(patch),
-        None => log_warn!("Inventory screen: {what} is not the instruction expected."),
     }
 }
 

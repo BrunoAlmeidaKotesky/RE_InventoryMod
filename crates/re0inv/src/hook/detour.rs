@@ -9,7 +9,7 @@
 //! hooked here has semantics simple enough to reimplement completely: find an
 //! empty slot, count empty slots, search for an item.
 
-use crate::core::logging::{log_error, log_info};
+use crate::core::logging::{log_error, log_info, log_warn};
 use crate::hook::patch::Patch;
 
 /// `jmp rel32`.
@@ -40,6 +40,41 @@ pub fn jump_bytes(from: usize, to: usize) -> Option<[u8; JUMP_LENGTH]> {
         offset[2],
         offset[3],
     ])
+}
+
+/// Replaces one instruction with a jump to `handler`, padding the rest of it
+/// with `nop`, after verifying the instruction is the `expected` bytes.
+///
+/// The shape every mid-function detour in this mod takes. It lived as a copy
+/// in each feature until there were three of them; a fix here now reaches them
+/// all.
+///
+/// A patch that cannot be built or does not match is reported and skipped
+/// rather than forced: writing over an instruction that is not what we think
+/// it is corrupts the game, while not patching merely leaves a feature out.
+///
+/// # Safety
+/// `at` must be a patchable instruction of exactly `expected.len()` bytes in
+/// the running build's code.
+pub unsafe fn jump_over(
+    patches: &mut Vec<crate::hook::patch::Patch>,
+    what: &str,
+    at: usize,
+    expected: &[u8],
+    handler: usize,
+) {
+    let Some(jump) = jump_bytes(at, handler) else {
+        log_warn!("Could not build the jump for {what}.");
+        return;
+    };
+
+    let mut bytes = vec![OP_NOP; expected.len()];
+    bytes[..jump.len()].copy_from_slice(&jump);
+
+    match crate::hook::patch::Patch::write_expecting(at, expected, &bytes) {
+        Some(patch) => patches.push(patch),
+        None => log_warn!("Not patching {what}: it is not the instruction expected."),
+    }
 }
 
 /// `call rel32`, which is a jump that leaves somewhere to come back to.
