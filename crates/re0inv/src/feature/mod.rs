@@ -4,11 +4,74 @@
 //! asked for. They share the patching machinery in `hook` and the verified
 //! addresses in `game::addresses`; nothing else is shared, so one feature
 //! failing to install leaves the others alone.
+//!
+//! On top of the runtime switches, each feature is a Cargo feature, so the mod
+//! also ships as single-feature builds. A build without a feature carries a
+//! stub of its public surface — `is_open` answering no, `enable` explaining
+//! itself — so the rest of the code neither knows nor cares which build it is.
 
+#[cfg(feature = "doors")]
 pub mod doors;
+#[cfg(feature = "itembox")]
 pub mod item_box;
+#[cfg(feature = "itembox")]
 pub mod menu;
+#[cfg(feature = "itembox")]
 pub mod typewriter;
+
+/// What the rest of the mod may ask about a box that was not compiled in.
+///
+/// Every answer is the inert one, so the callers need no conditions of their
+/// own: nothing is ever open, storing succeeds at storing nothing, and the one
+/// answer a player could notice — the toggle key — says what is going on.
+#[cfg(not(feature = "itembox"))]
+#[allow(dead_code)] // Which stubs are called depends on the other features.
+pub mod item_box {
+    use crate::core::logging::log_warn;
+    use crate::game::inventory::{Bag, Item};
+    use crate::store::window::Window;
+
+    pub fn is_open() -> bool {
+        false
+    }
+
+    pub fn exists() -> bool {
+        false
+    }
+
+    pub fn toggle() -> bool {
+        log_warn!("This build of the mod does not include the item box.");
+        false
+    }
+
+    pub fn close_with_menu() {}
+
+    pub fn scroll(_rows: i32) -> bool {
+        false
+    }
+
+    pub fn state() -> Option<(usize, usize, usize)> {
+        None
+    }
+
+    pub fn contents() -> Vec<Item> {
+        Vec::new()
+    }
+
+    pub fn set_contents(_items: Vec<Item>) {}
+
+    pub fn view() -> *mut Bag {
+        std::ptr::null_mut()
+    }
+
+    pub fn with_window<R>(_view: *const Bag, _action: impl FnOnce(&mut Window) -> R) -> Option<R> {
+        None
+    }
+
+    pub fn probe_positions(_view: *const Bag, _ask: impl FnMut() -> i32) -> Option<i32> {
+        None
+    }
+}
 
 use std::sync::Mutex;
 
@@ -19,15 +82,21 @@ use crate::game::addresses::Addresses;
 /// What has been applied, kept because the bytes each patch replaced live
 /// inside it and are the only way back.
 static INSTALLED: Mutex<Installed> = Mutex::new(Installed {
+    #[cfg(feature = "doors")]
     doors: None,
+    #[cfg(feature = "itembox")]
     typewriter: None,
+    #[cfg(feature = "itembox")]
     menu: None,
 });
 
 #[derive(Default)]
 struct Installed {
+    #[cfg(feature = "doors")]
     doors: Option<doors::Doors>,
+    #[cfg(feature = "itembox")]
     typewriter: Option<typewriter::Typewriter>,
+    #[cfg(feature = "itembox")]
     menu: Option<menu::Menu>,
 }
 
@@ -36,7 +105,8 @@ struct Installed {
 /// # Safety
 /// The addresses must belong to the build actually running, and the code
 /// section must be decrypted.
-pub unsafe fn install_all(addresses: &Addresses, config: &Config) {
+pub unsafe fn install_all(#[cfg_attr(not(any(feature = "itembox", feature = "doors")), allow(unused_variables))] addresses: &Addresses, config: &Config) {
+    #[cfg(feature = "itembox")]
     if config.item_box.enabled {
         item_box::enable(config.item_box.slots);
         watch_typewriter(addresses);
@@ -51,12 +121,24 @@ pub unsafe fn install_all(addresses: &Addresses, config: &Config) {
         keep(|installed| installed.menu = Some(screen));
     }
 
+    #[cfg(not(feature = "itembox"))]
+    if config.item_box.enabled {
+        log_warn!("ItemBox=1 in the ini, but this build does not include the item box.");
+    }
+
+    #[cfg(feature = "doors")]
     if config.doors.skip {
         let doors = doors::Doors::install(addresses, config.doors.shorten_fades);
         keep(|installed| installed.doors = Some(doors));
     }
+
+    #[cfg(not(feature = "doors"))]
+    if config.doors.skip {
+        log_warn!("SkipDoors=1 in the ini, but this build does not include the door skip.");
+    }
 }
 
+#[cfg(any(feature = "itembox", feature = "doors"))]
 fn keep(action: impl FnOnce(&mut Installed)) {
     match INSTALLED.lock() {
         Ok(mut installed) => action(&mut installed),
@@ -69,23 +151,28 @@ fn keep(action: impl FnOnce(&mut Installed)) {
 /// # Safety
 /// The game module must still be mapped.
 pub unsafe fn remove_all() {
+    #[cfg_attr(not(any(feature = "itembox", feature = "doors")), allow(unused_mut, unused_variables))]
     let Ok(mut installed) = INSTALLED.lock() else {
         log_warn!("Feature registry is poisoned; refusing to touch the game's code.");
         return;
     };
 
+    #[cfg_attr(not(any(feature = "itembox", feature = "doors")), allow(unused_mut))]
     let mut removed = 0;
 
+    #[cfg(feature = "itembox")]
     if let Some(screen) = installed.menu.as_mut() {
         screen.remove();
         removed += 1;
     }
 
+    #[cfg(feature = "itembox")]
     if let Some(prompt) = installed.typewriter.as_mut() {
         prompt.remove();
         removed += 1;
     }
 
+    #[cfg(feature = "doors")]
     if let Some(doors) = installed.doors.as_mut() {
         doors.remove();
         removed += 1;
@@ -105,6 +192,7 @@ pub unsafe fn remove_all() {
 ///
 /// # Safety
 /// The address must belong to the build actually running.
+#[cfg(feature = "itembox")]
 unsafe fn watch_typewriter(addresses: &Addresses) {
     // `sub esp, 0x54; push esi; push edi` — exactly five bytes, so the jump
     // covers the three instructions with nothing left over to pad.

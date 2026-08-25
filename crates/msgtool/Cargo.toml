@@ -15,3 +15,7 @@ path = "src/main.rs"
 # decompressing and compressing again. Nothing else in the format needs a
 # library.
 flate2 = "1"
+
+[lib]
+name = "msgtool"
+path = "src/lib.rs"

@@ -31,3 +31,6 @@ dev-notes/
 
 # Third-party reference, read only, never distributed.
 reference/
+
+# Release packages, built by tools/release.ps1.
+dist/

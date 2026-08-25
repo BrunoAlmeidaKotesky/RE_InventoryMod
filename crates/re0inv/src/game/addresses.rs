@@ -12,7 +12,14 @@ use super::build::Build;
 
 /// Addresses for one game build. All are runtime virtual addresses; the module
 /// has no ASLR and always loads at its preferred base.
+///
+/// The table is complete in every build; a single-feature build simply reads
+/// fewer of the fields, which is what the allow below is about.
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(
+    not(all(feature = "expanded", feature = "itembox", feature = "doors")),
+    allow(dead_code)
+)]
 pub struct Addresses {
     /// `int __thiscall(Bag*)` - number of empty slots.
     pub bag_count_empty: usize,

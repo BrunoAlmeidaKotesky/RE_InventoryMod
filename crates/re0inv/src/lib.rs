@@ -5,6 +5,10 @@
 //! build. Anything unverified is left alone.
 
 #![cfg(windows)]
+// The doors-only build compiles the accessor and store machinery but installs
+// none of it; the linker strips what nothing reaches. Warning about each unused
+// piece would mean scattering cfg through code the other builds exercise fully.
+#![cfg_attr(not(any(feature = "expanded", feature = "itembox")), allow(dead_code))]
 
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
@@ -15,6 +19,7 @@ use crate::win32::{
 };
 
 mod core;
+#[cfg(any(feature = "expanded", feature = "itembox"))]
 mod save;
 mod debug;
 mod feature;
@@ -138,12 +143,31 @@ fn startup() {
         }
     }
 
+    // Without the expanded-inventory feature the stores stay at the game's own
+    // six slots: the views pass straight through, and only the box, if built
+    // in, makes use of the machinery.
+    #[cfg(feature = "expanded")]
     store::registry::set_capacity(config.slots);
+    #[cfg(not(feature = "expanded"))]
+    store::registry::set_capacity(game::inventory::BAG_SIZE);
+
+    // The accessor and panel hooks serve both the extra slots and the box; a
+    // doors-only build patches neither, and neither needs saving.
+    #[cfg(any(feature = "expanded", feature = "itembox"))]
     install_hooks(detected.as_ref());
+
+    // The prompt archives are built here, from the player's own files, so a
+    // fresh install works without any tool being run first.
+    #[cfg(feature = "itembox")]
+    if config.item_box.enabled {
+        feature::typewriter::message::ensure_archives(&game_dir);
+    }
+
     install_features(detected.as_ref(), &config);
 
     // Last, and always. Everything above only matters while the process is
     // running; this is what stops the player losing it when they stop playing.
+    #[cfg(any(feature = "expanded", feature = "itembox"))]
     install_persistence(detected.as_ref(), &game_dir, code.start..code.end());
 
     log_info!("Initialization complete.");
@@ -158,6 +182,7 @@ fn startup() {
 /// Writing a jump into whatever happens to sit at an address in some other
 /// build is how a mod corrupts a save. Doing nothing is always the safer
 /// failure.
+#[cfg(any(feature = "expanded", feature = "itembox"))]
 fn install_hooks(build: Option<&Build>) {
     let Some(build) = build else {
         log_warn!("Build unknown, so nothing will be patched.");
@@ -196,6 +221,7 @@ fn install_features(build: Option<&Build>, config: &Config) {
 /// This is not behind a switch. Turning the extra slots off while a save has
 /// items in them is exactly when the data has to be read and written back
 /// untouched, rather than quietly dropped.
+#[cfg(any(feature = "expanded", feature = "itembox"))]
 fn install_persistence(build: Option<&Build>, game_dir: &Path, code: std::ops::Range<usize>) {
     let Some(addresses) = build.and_then(addresses::for_build) else {
         log_warn!("No verified addresses for this build, so nothing will be saved or loaded.");

@@ -165,6 +165,7 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
 
         // Hands the box its contents from the side file once a bag restore has
         // vouched for it. Almost always a no-op.
+        #[cfg(any(feature = "expanded", feature = "itembox"))]
         crate::save::settle();
 
         std::thread::sleep(POLL_INTERVAL);
@@ -264,6 +265,7 @@ fn dispatch_command(key: i32, ini: &Path, debug_keys: bool) {
         VK_F8 => unsafe {
             crate::hook::remove_all_installed();
             crate::feature::remove_all();
+            #[cfg(any(feature = "expanded", feature = "itembox"))]
             crate::save::remove_installed();
         },
         VK_F9 => probe::scan(ini),

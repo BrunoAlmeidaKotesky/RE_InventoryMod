@@ -1,31 +1,12 @@
-//! Reads and rebuilds the game's message archives.
+//! Command-line front end over the msgtool library.
 //!
-//! The item box needs a third choice on the typewriter prompt, and what the
-//! prompt offers is decided by the game's message files rather than by its code.
-//! So there is no way to add one without touching that text.
-//!
-//! What this tool never does is modify the player's own files. It reads
-//! `msg_<lang>.arc`, edits a copy in memory, and writes the result out under a
-//! different name that the mod redirects to at runtime. The originals stay
-//! exactly as Steam installed them, so verifying the game files reports nothing
-//! and uninstalling is a delete.
+//! The mod builds the archives itself at startup; this binary exists for
+//! inspecting archives and for building them by hand while developing.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 
-mod arc;
-mod gmd;
-mod typewriter;
-
-/// Suffix for the archives this tool writes.
-///
-/// Deliberately not `_box`, which is what re0box writes. Both mods redirect the
-/// game to their own copy of the same file, and sharing a name would mean
-/// whichever loaded last silently decided what the other one's prompt said.
-const SUFFIX: &str = "_inv";
-
-/// Every language the game ships a message archive for.
-const LANGUAGES: [&str; 8] = ["chS", "chT", "eng", "fre", "ger", "ita", "jpn", "spa"];
+use msgtool::{gmd, open, original, LANGUAGES};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -95,54 +76,25 @@ fn show(path: &Path, name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Reads every archive and rebuilds every message file inside it, unchanged.
-///
-/// This proves the format is understood before anything is written. A message
-/// file that comes back different is one this tool must not be editing.
 fn verify(dir: &Path) -> Result<(), String> {
-    let mut checked = 0;
-    let mut failed = 0;
-
-    for language in LANGUAGES {
-        let path = original(dir, language);
-        if !path.exists() {
-            continue;
-        }
-
-        let archive = open(&path)?;
-
-        for entry in &archive.entries {
-            if !entry.name.starts_with("message\\") {
-                continue;
-            }
-
-            checked += 1;
-            if let Err(e) = gmd::verify(&entry.data) {
-                failed += 1;
-                println!("  FAIL {language} {}: {e}", entry.name);
-            }
-        }
-    }
-
-    println!("{checked} message file(s) checked, {failed} failed.");
-
-    if failed > 0 {
-        return Err("the format is not fully understood; nothing should be written".into());
-    }
-
+    let checked = msgtool::verify(dir)?;
+    println!("{checked} message file(s) checked, 0 failed.");
     Ok(())
 }
 
+/// Builds every language present, overwriting patched archives already there.
+///
+/// Overwriting is the difference from what the mod does at startup: by hand,
+/// "build" means "build again".
 fn build(dir: &Path) -> Result<(), String> {
     let mut built = 0;
 
     for language in LANGUAGES {
-        let source = original(dir, language);
-        if !source.exists() {
+        if !original(dir, language).exists() {
             continue;
         }
 
-        match build_one(&source, dir, language) {
+        match msgtool::build_one(dir, language) {
             Ok(report) => {
                 built += 1;
                 println!("  {language}: {report}");
@@ -157,61 +109,4 @@ fn build(dir: &Path) -> Result<(), String> {
 
     println!("{built} archive(s) written.");
     Ok(())
-}
-
-fn build_one(source: &Path, dir: &Path, language: &str) -> Result<String, String> {
-    let mut archive = open(source)?;
-
-    let name = format!("message\\message_commonmsg_{language}");
-    let entry = archive
-        .find(&name)
-        .ok_or_else(|| format!("no entry named '{name}'"))?;
-
-    let mut file = gmd::Gmd::read(&entry.data)?;
-    let mut changed = Vec::new();
-
-    let current = file
-        .get(typewriter::WITH_RIBBON)
-        .ok_or("the message file is shorter than expected")?;
-
-    match typewriter::with_ribbon(&current) {
-        Some(patched) => {
-            file.set(typewriter::WITH_RIBBON, &patched)?;
-            changed.push("with a ribbon");
-        }
-        None => return Err("the prompt is not the one expected".into()),
-    }
-
-    let current = file
-        .get(typewriter::WITHOUT_RIBBON)
-        .ok_or("the message file is shorter than expected")?;
-
-    match typewriter::without_ribbon(&current, language) {
-        Some(patched) => {
-            file.set(typewriter::WITHOUT_RIBBON, &patched)?;
-            changed.push("without one");
-        }
-        None if !typewriter::translated(language) => changed.push("not translated"),
-        None => changed.push("already offers a choice"),
-    }
-
-    entry.data = file.write();
-
-    let out = patched_path(dir, language);
-    std::fs::write(&out, archive.write()).map_err(|e| format!("{}: {e}", out.display()))?;
-
-    Ok(format!("{} ({})", out.display(), changed.join(", ")))
-}
-
-fn original(dir: &Path, language: &str) -> PathBuf {
-    dir.join(format!("msg_{language}.arc"))
-}
-
-fn patched_path(dir: &Path, language: &str) -> PathBuf {
-    dir.join(format!("msg_{language}{SUFFIX}.arc"))
-}
-
-fn open(path: &Path) -> Result<arc::Archive, String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    arc::Archive::read(&bytes)
 }

@@ -269,6 +269,7 @@ pub unsafe fn allow_exchange(menu: usize) {
 ///
 /// # Safety
 /// `menu` must be a live menu object.
+#[cfg(feature = "itembox")]
 pub unsafe fn restore_exchange(menu: usize) {
     let Ok(saved) = SAVED_EXCHANGE.lock() else {
         return;
@@ -306,6 +307,7 @@ unsafe fn show_partner_half(menu: usize) {
 /// # Safety
 /// The menu object must still be alive, which is why this runs while the screen
 /// is closing rather than after.
+#[cfg(feature = "itembox")]
 pub unsafe fn restore_partner_half() {
     let Ok(mut saved) = SAVED_EXCHANGE.lock() else {
         return;

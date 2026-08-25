@@ -337,4 +337,4 @@ extern "C" fn opening_box() -> i32 {
 
 // --- Pointing the game at our own message archive ---
 
-mod message;
+pub mod message;

@@ -172,3 +172,36 @@ fn log_missing(path: &std::path::Path) {
         );
     }
 }
+
+/// Writes the mod's message archives, for any language that lacks one.
+///
+/// This is what makes installing the mod nothing but copying files: the first
+/// launch builds `msg_<lang>_inv.arc` from the player's own archives, and later
+/// launches find them present and write nothing. The originals are only read.
+///
+/// Failing is not fatal — the redirection above checks for the file on every
+/// load, so the typewriter simply keeps its own prompt, and the box stays
+/// reachable through the inventory key.
+pub fn ensure_archives(game_dir: &std::path::Path) {
+    let messages = game_dir.join("nativePC").join("arc").join("message");
+
+    if !messages.is_dir() {
+        log_warn!("No message directory at {}; the typewriter keeps its own prompt.", messages.display());
+        return;
+    }
+
+    match msgtool::build_missing(&messages) {
+        Ok(written) if written.is_empty() => {
+            log_info!("Typewriter prompt archives already in place.");
+        }
+        Ok(written) => {
+            for (language, report) in written {
+                log_info!("Typewriter prompt archive written for {language}: {report}.");
+            }
+        }
+        Err(e) => {
+            log_warn!("Could not build the typewriter prompt archives: {e}.");
+            log_warn!("The box stays reachable through the inventory key.");
+        }
+    }
+}

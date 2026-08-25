@@ -11,6 +11,21 @@ publish = false
 # rlib alongside it so the pure-logic modules can be unit tested.
 crate-type = ["cdylib", "rlib"]
 
-# No dependencies. The Win32 surface this needs is nine functions, declared in
-# src/win32.rs.
+# Which of the bundled improvements are compiled in. The full build ships all
+# three; each also builds alone, so a player can install exactly one. The
+# distinction is compile-time: code for an absent feature is not in the DLL.
+#
+# "expanded" rather than "inventory" because the accessor and panel machinery
+# is shared with the box; what this switch owns is the extra slots themselves.
+[features]
+default = ["expanded", "itembox", "doors"]
+expanded = []
+itembox = ["dep:msgtool"]
+doors = []
+
+# The one dependency is our own message-archive crate, and only when the box is
+# built in: the mod writes the typewriter prompt's archives itself on first
+# run, so installing is nothing but copying files. The Win32 surface the mod
+# needs is nine functions, declared in src/win32.rs.
 [dependencies]
+msgtool = { path = "../msgtool", optional = true }
