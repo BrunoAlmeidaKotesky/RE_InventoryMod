@@ -92,46 +92,41 @@ pub fn is_open() -> bool {
     OPEN.load(Ordering::Relaxed)
 }
 
-/// Shows the box.
+/// Shows the box, in answer to the box key or a stick click.
 ///
-/// Never hides it: the key doubles as a stick click, and a stick gets clicked
-/// by accident while navigating with it — which made the box vanish mid-use,
-/// replaced by the partner's real bag. The box closes with the menu, and only
-/// with the menu.
+/// Opening only, never closing: the key doubles as a stick click, and a stick
+/// gets clicked by accident while navigating with it — which made the box
+/// vanish mid-use, replaced by the partner's real bag. The box closes with the
+/// menu, and only with the menu.
 ///
-/// Refuses to open if the box was never set up, which happens when the feature
-/// is switched off.
-pub fn toggle() -> bool {
+/// The one difference from the typewriter path below is the reachability
+/// check: a key press can come from anywhere, and the box only lives at a
+/// typewriter.
+pub fn open_from_key() -> bool {
     if is_open() {
         return true;
     }
 
-    if !exists() {
-        log_warn!("The item box is switched off in the configuration.");
-        return false;
-    }
-
-    // The box lives at the typewriter, as it does in the rest of the series.
-    // Away from one it cannot be opened at all.
     if !within_reach() {
         log_info!("The item box is only reachable at a typewriter.");
         return false;
     }
 
-    rewind();
-    OPEN.store(true, Ordering::Relaxed);
-    log_info!("Partner panel now showing the item box.");
-    true
+    open("Partner panel now showing the item box.")
 }
 
-/// Shows the box because the player asked for it on the typewriter prompt.
+/// Shows the box because the player chose it on the typewriter prompt.
 ///
 /// No reachability check: the request came from the typewriter itself, which is
 /// a better proof of standing at one than any timer.
-pub fn force_open() {
+pub fn open_from_typewriter() {
+    open("Item box opened from the typewriter.");
+}
+
+fn open(said: &str) -> bool {
     if !exists() {
-        log_warn!("The item box was chosen, but it is switched off in the configuration.");
-        return;
+        log_warn!("The item box is switched off in the configuration.");
+        return false;
     }
 
     // Always from the first slot. A window left wherever the last visit ended
@@ -140,7 +135,20 @@ pub fn force_open() {
     rewind();
 
     if !OPEN.swap(true, Ordering::Relaxed) {
-        log_info!("Item box opened from the typewriter.");
+        log_info!("{said}");
+    }
+    true
+}
+
+/// Marks the box as no longer showing, without touching the screen.
+///
+/// For the paths where the menu is not there to restore — the debug key that
+/// removes every hook, and a mid-screen character swap that makes the other
+/// half a real character again. An accessor with no caller filter would
+/// otherwise keep answering world questions with the box forever.
+pub fn abandon() {
+    if OPEN.swap(false, Ordering::Relaxed) {
+        log_info!("Item box put away.");
     }
 }
 

@@ -39,10 +39,12 @@ pub mod item_box {
         false
     }
 
-    pub fn toggle() -> bool {
+    pub fn open_from_key() -> bool {
         log_warn!("This build of the mod does not include the item box.");
         false
     }
+
+    pub fn abandon() {}
 
     pub fn close_with_menu() {}
 
@@ -151,6 +153,10 @@ fn keep(action: impl FnOnce(&mut Installed)) {
 /// # Safety
 /// The game module must still be mapped.
 pub unsafe fn remove_all() {
+    // With the hooks gone nothing ever closes the box, and an accessor still
+    // patched in mid-removal would keep answering with it out in the world.
+    item_box::abandon();
+
     #[cfg_attr(not(any(feature = "itembox", feature = "doors")), allow(unused_mut, unused_variables))]
     let Ok(mut installed) = INSTALLED.lock() else {
         log_warn!("Feature registry is poisoned; refusing to touch the game's code.");

@@ -159,9 +159,15 @@ const OFFSET_PHASE: usize = 0x294;
 /// Slots across the panel. A vertical move is a step of this.
 pub const COLUMNS: i32 = 2;
 
-/// One past the highest cursor value the game uses.
-#[allow(dead_code)] // Kept beside set_cursor, which is currently unused too.
-const CURSOR_LIMIT: i32 = 6;
+/// The partner half's own selection, `menu+0x2BC`.
+///
+/// Proved by the navigation code at `0x005E3BD1`-`0x005E3D6F`, which reads and
+/// writes exactly this field while the selection is over there. The played
+/// half's cursor above freezes at its last value for that whole time.
+const OFFSET_PARTNER_CURSOR: usize = 0x2BC;
+
+/// The menu phase while the selection is in the partner's half.
+pub const PHASE_PARTNER_HALF: i32 = 7;
 
 /// The menu object, if the inventory has been drawn at least once.
 pub fn menu() -> Option<usize> {
@@ -181,34 +187,10 @@ pub fn cursor() -> Option<i32> {
     crate::debug::memory::read_i32(menu + OFFSET_CURSOR)
 }
 
-/// Moves the selection.
-///
-/// Writing this is what the game itself does when the cursor moves, so it is
-/// also the most likely way to make the panel notice that something changed.
-///
-/// # Safety
-/// The menu object must still be alive, which is true while the inventory is
-/// open and stops being true at some point after it closes. The value is a
-/// single aligned word, so a stale write lands in freed memory rather than
-/// tearing a structure.
-#[allow(dead_code)] // The follow-the-item scroll was backwards; kept for a future use.
-pub unsafe fn set_cursor(value: i32) -> bool {
-    let Some(menu) = menu() else { return false };
-
-    // Reading first proves the page is still mapped, and the range proves it
-    // still looks like a cursor rather than whatever was allocated over a menu
-    // that has been closed.
-    let plausible = crate::debug::memory::read_i32(menu + OFFSET_CURSOR)
-        .is_some_and(|current| (0..CURSOR_LIMIT).contains(&current));
-
-    if !plausible {
-        return false;
-    }
-
-    // Volatile: the game reads this field on its own thread, so the write must
-    // not be reordered or folded away.
-    ((menu + OFFSET_CURSOR) as *mut i32).write_volatile(value);
-    true
+/// Where the selection is inside the partner's half, while it is over there.
+pub fn partner_cursor() -> Option<i32> {
+    let menu = menu()?;
+    crate::debug::memory::read_i32(menu + OFFSET_PARTNER_CURSOR)
 }
 
 // --- Making the partner half usable as the box ---

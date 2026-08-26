@@ -280,13 +280,16 @@ extern "C" fn character_changed(menu: usize) {
             if still_ours {
                 panel::allow_exchange(menu);
             } else {
-                // The other half is a real character again, so the game's own
-                // answer about reaching them is the right one.
+                // The other half is a real character again — the one the box
+                // was standing in for. The box closes outright: half-open, the
+                // accessors would keep answering questions about that
+                // character with the box's contents.
+                crate::feature::item_box::abandon();
                 panel::restore_exchange(menu);
             }
         }
 
-        log_debug!("Played character changed; the box is {}.", if still_ours { "still in the other half" } else { "not in the other half" });
+        log_debug!("Played character changed; the box is {}.", if still_ours { "still in the other half" } else { "closed" });
     });
 }
 

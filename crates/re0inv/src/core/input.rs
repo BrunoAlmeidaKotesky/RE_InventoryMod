@@ -174,6 +174,12 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
 
 /// Scrolls when the selection is pressed against the bottom row.
 ///
+/// Which half the selection is in decides both which cursor to read and what
+/// to scroll. In the partner's half — which is the box, when it is showing —
+/// the game keeps a separate cursor, and the played half's freezes at its last
+/// value; reading the frozen one here is what once made pressing down in the
+/// box shuffle the bags instead.
+///
 /// Only downwards. Pressing up on the top row already does something in this
 /// game — it moves to the tabs above the panel — and a binding that fights an
 /// existing one is worse than none. Reaching earlier slots is done by carrying
@@ -183,22 +189,41 @@ fn try_edge_scroll(cursor: Option<i32>) {
         return;
     }
 
+    let in_partner_half = panel::phase() == Some(panel::PHASE_PARTNER_HALF);
+
+    let cursor = if in_partner_half {
+        panel::partner_cursor()
+    } else {
+        cursor
+    };
+
     let Some(cursor) = cursor else { return };
 
     if cursor < BAG_SIZE as i32 - panel::COLUMNS {
         return;
     }
 
-    if registry::scroll_all(SCROLL_STEP) == 0 {
+    let box_focused = in_partner_half && crate::feature::item_box::is_open();
+
+    let moved = if box_focused {
+        crate::feature::item_box::scroll(SCROLL_STEP)
+    } else {
+        registry::scroll_all(SCROLL_STEP) > 0
+    };
+
+    if !moved {
         // Already at the end of the store, so start over from the top.
-        if registry::rewind_all() == 0 {
+        let wrapped = if box_focused {
+            crate::feature::item_box::scroll(i32::MIN / 2)
+        } else {
+            registry::rewind_all() > 0
+        };
+
+        if !wrapped {
             return;
         }
 
         log_info!("Wrapped back to the first slot.");
-        panel::request_redraw();
-        report();
-        return;
     }
 
     // The selection stays where it is — the bottom row — and the next items
@@ -352,6 +377,6 @@ fn scroll_or_wrap() {
 /// The panel is asked to redraw: the icons are built when the inventory opens,
 /// so swapping what the panel is showing is exactly the case that needs one.
 fn toggle_box() {
-    crate::feature::item_box::toggle();
+    crate::feature::item_box::open_from_key();
     panel::request_redraw();
 }

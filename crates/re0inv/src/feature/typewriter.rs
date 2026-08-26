@@ -328,7 +328,7 @@ extern "C" fn opening_box() -> i32 {
             }
         }
 
-        crate::feature::item_box::force_open();
+        crate::feature::item_box::open_from_typewriter();
         1
     });
 

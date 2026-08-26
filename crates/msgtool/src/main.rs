@@ -97,7 +97,10 @@ fn build(dir: &Path) -> Result<(), String> {
         match msgtool::build_one(dir, language) {
             Ok(report) => {
                 built += 1;
-                println!("  {language}: {report}");
+                println!(
+                    "  {language}: {} ({report})",
+                    msgtool::patched_path(dir, language).display()
+                );
             }
             Err(e) => println!("  {language}: skipped, {e}"),
         }
