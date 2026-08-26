@@ -438,6 +438,13 @@ Incremental, testando in-game a cada passo:
 
 - **Não escrever patch antes de validar o endereço.** Sempre: desassemblar → confirmar que
   o código faz o que se espera → só então patchear.
+- **Hipótese de comportamento também exige disassembly, não só endereço.** Duas rodadas
+  de teste do usuário foram queimadas com consertos plausíveis que o disassembly teria
+  descartado em minutos (o filtro de chamador na travessia da caixa; o cursor "seguindo o
+  item"). O fluxo padrão para qualquer bug de comportamento do jogo: reproduzir no log →
+  desassemblar o caminho → apontar a instrução exata → só então corrigir. A tabela do
+  re0box e o `analyzer` deste repo (`disasm`, `xrefs`, `disp`, `pattern`) são a primeira
+  parada, não o último recurso.
 - **Preferir sigscan a endereço literal.** Endereço literal quebra na próxima atualização
   da Capcom. Padrão de bytes sobrevive à maioria.
 - **Logging generoso desde o dia um.** Sem debugger decente, o log é a única visibilidade.

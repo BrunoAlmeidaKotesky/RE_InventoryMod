@@ -41,11 +41,15 @@ const BUMP_PHASE: [u8; 6] = [0xFF, 0x87, 0x94, 0x02, 0x00, 0x00];
 const TEST_PARTNER_SHOWN: [u8; 7] = [0x80, 0xBF, 0xCA, 0x02, 0x00, 0x00, 0x01];
 /// `mov eax, [esi+0x60]; push 0`.
 const CLOSING: [u8; 5] = [0x8B, 0x46, 0x60, 0x6A, 0x00];
+/// `cmp byte ptr [eax+0x25], 1; je 0x005E50F7`.
+const VALIDATION: [u8; 10] = [0x80, 0x78, 0x25, 0x01, 0x0F, 0x84, 0x4F, 0x15, 0x00, 0x00];
 
 static PLAY_ANIMATION: AtomicUsize = AtomicUsize::new(0);
 static START_CONTINUE: AtomicUsize = AtomicUsize::new(0);
 static CHANGE_CONTINUE: AtomicUsize = AtomicUsize::new(0);
 static CLOSE_CONTINUE: AtomicUsize = AtomicUsize::new(0);
+static VALID_CONTINUE: AtomicUsize = AtomicUsize::new(0);
+static VALID_KICK: AtomicUsize = AtomicUsize::new(0);
 
 /// The partner the box stood in for, so a character swap can be noticed.
 static BOX_PARTNER: AtomicUsize = AtomicUsize::new(0);
@@ -98,6 +102,17 @@ impl Menu {
             addresses.inventory_menu_close,
             &CLOSING,
             close_stub as unsafe extern "C" fn() as usize,
+        );
+
+        VALID_CONTINUE.store(addresses.partner_half_continue, Ordering::Relaxed);
+        VALID_KICK.store(addresses.partner_half_kick, Ordering::Relaxed);
+
+        crate::hook::detour::jump_over(
+            &mut patches,
+            "the partner-half validation",
+            addresses.partner_half_valid,
+            &VALIDATION,
+            valid_stub as unsafe extern "C" fn() as usize,
         );
 
         log_info!("Inventory screen: {} patch(es) applied.", patches.len());
@@ -273,6 +288,60 @@ extern "C" fn character_changed(menu: usize) {
 
         log_debug!("Played character changed; the box is {}.", if still_ours { "still in the other half" } else { "not in the other half" });
     });
+}
+
+/// Stands in for the check that throws the selection out of the partner half.
+///
+/// The game re-validates every frame that the partner is still there to
+/// exchange with, and kicks the selection back to the played half when not.
+/// Right behaviour for a partner, who can walk away — this is why the box
+/// worked exactly when the partner happened to be standing close, and read as
+/// broken the rest of the time. A box cannot walk away, so while it is the
+/// thing in that half the validation always passes.
+///
+/// # Safety
+/// Reached only through the jump written over the compare-and-branch pair, so
+/// `eax` holds the object whose byte was being tested, and `eax` is dead after
+/// the pair — the code at the continuation reloads it immediately.
+#[unsafe(naked)]
+unsafe extern "C" fn valid_stub() {
+    core::arch::naked_asm!(
+        "pushad",
+        "mov ebp, esp",
+        "and esp, -16",
+        "sub esp, 16",
+        "mov [esp], eax",
+        "call {decide}",
+        "mov esp, ebp",
+        // Flags survive popad, so the branch below still sees this test.
+        "test eax, eax",
+        "popad",
+        "jnz 2f",
+        "jmp dword ptr [{continue_at}]",
+        "2:",
+        "jmp dword ptr [{kick}]",
+        decide = sym still_valid,
+        continue_at = sym VALID_CONTINUE,
+        kick = sym VALID_KICK,
+    )
+}
+
+/// Whether the selection should be thrown out of the partner half.
+extern "C" fn still_valid(unit: usize) -> i32 {
+    let result = std::panic::catch_unwind(|| {
+        // The box does not walk away.
+        if crate::feature::item_box::is_open() {
+            return 0;
+        }
+
+        // The game's own check, reproduced: byte 0x25 set means gone.
+        match crate::debug::memory::read_array::<1>(unit + 0x25) {
+            Some([1]) => 1,
+            _ => 0,
+        }
+    });
+
+    result.unwrap_or(0)
 }
 
 /// Runs as the screen closes.

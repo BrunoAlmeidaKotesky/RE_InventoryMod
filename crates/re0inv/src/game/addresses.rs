@@ -110,6 +110,16 @@ pub struct Addresses {
     /// `mov eax, [esi+0x60]; push 0` as the screen closes. Five bytes.
     pub inventory_menu_close: usize,
 
+    /// `cmp byte ptr [eax+0x25], 1; je <kick>` at the top of the handler that
+    /// runs every frame while the selection is in the partner's half. Ten
+    /// bytes. The byte tracks whether the partner is still there to exchange
+    /// with, and the `je` throws the selection back out when they are not.
+    pub partner_half_valid: usize,
+    /// The instruction after that pair.
+    pub partner_half_continue: usize,
+    /// Where the `je` went: the write that puts the menu back in phase six.
+    pub partner_half_kick: usize,
+
     // --- Saving and loading ---
 
     /// `imul edi, 0x1C850` where the game works out which slot it is saving to.
@@ -187,6 +197,10 @@ const JAN_2025: Addresses = Addresses {
     inventory_menu_start: 0x005E_1EF6,
     inventory_change_character: 0x005E_2F3A,
     inventory_menu_close: 0x005D_8D03,
+
+    partner_half_valid: 0x005E_3B9E,
+    partner_half_continue: 0x005E_3BA8,
+    partner_half_kick: 0x005E_50F7,
 
     save_slot: 0x0061_36D9,
     load_slot: 0x0061_27E1,

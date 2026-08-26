@@ -593,3 +593,38 @@ lies inside the game's code section.
 
 The mod's own data goes to `re0inv_saves.bin` beside the executable — the
 game's `data0.bin` is never written.
+
+## Partner-half navigation (inventory phase 7)
+
+The inventory state machine at `0x005E1D10` dispatches on `menu+0x294`. Phase 7
+is "the selection is in the partner's half", entered at `0x005E3A48`:
+
+```asm
+0x005E3A48  mov al, [edi+0x28B]      ; exchange field; 0 allows
+0x005E3A4E  test al, al
+0x005E3A50  jne 0x005E3A94           ; 1/2/3 -> refusal messages 0x2E/0x2F/0x30
+0x005E3A52  cmp [edi+0x2CA], al      ; partner half shown yet?
+0x005E3A5E  mov byte [edi+0x2CA], 1  ; show it now if not
+0x005E3A74  mov dword [edi+0x2BC], 0 ; partner-half cursor to slot 0
+0x005E3A85  mov dword [edi+0x294], 7 ; enter phase 7
+```
+
+The phase-7 handler re-validates every frame before reading input:
+
+```asm
+0x005E3B9E  cmp byte ptr [eax+0x25], 1   ; partner no longer exchangeable?
+0x005E3BA2  je  0x005E50F7               ; kick back to phase 6
+0x005E3BA8  mov eax, [0xE2D7C8]          ; then the input tests
+```
+
+That byte tracks the partner walking out of exchange range. With the item box
+in the partner half this fired whenever the real partner wandered, which threw
+the selection out of the box on the next frame — the box worked exactly when
+the partner happened to stand close. The mod detours the pair at `0x005E3B9E`
+(ten bytes, unique in the binary) and passes the validation while the box is
+open; without the box the original compare is reproduced.
+
+Navigation inside the half operates on `menu+0x2BC` (up at `0x005E3BD1`, down
+around `0x005E3C99`, left at `0x005E3D55`, right around `0x005E3Exx`), which is
+also where the earlier finding "menu+0x2B4 is the played half's cursor,
+menu+0x2BC the partner's" comes from.
