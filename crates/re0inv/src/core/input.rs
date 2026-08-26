@@ -189,7 +189,7 @@ fn try_edge_scroll(cursor: Option<i32>) {
         return;
     }
 
-    if scroll_everything(SCROLL_STEP) == 0 {
+    if registry::scroll_all(SCROLL_STEP) == 0 {
         // Already at the end of the store, so start over from the top.
         if registry::rewind_all() == 0 {
             return;
@@ -201,13 +201,10 @@ fn try_edge_scroll(cursor: Option<i32>) {
         return;
     }
 
-    // The contents moved up by a row under the selection, so move the selection
-    // down by one to keep it on the same item.
-    let followed = cursor - panel::COLUMNS;
-    if (0..BAG_SIZE as i32).contains(&followed) {
-        unsafe { panel::set_cursor(followed) };
-    }
-
+    // The selection stays where it is — the bottom row — and the next items
+    // arrive under it. Following the old item upward was tried first, and it
+    // reads exactly backwards: the player pressed down to reach the new items,
+    // not to keep holding the old one.
     panel::request_redraw();
     report();
 }
@@ -246,13 +243,13 @@ fn dispatch_command(key: i32, ini: &Path, debug_keys: bool) {
     match key {
         VK_HOME => toggle_box(),
         VK_PAGE_UP => {
-            if scroll_everything(-SCROLL_STEP) > 0 {
+            if scroll_focused(-SCROLL_STEP) > 0 {
                 panel::request_redraw();
             }
             report();
         }
         VK_PAGE_DOWN => {
-            if scroll_everything(SCROLL_STEP) > 0 {
+            if scroll_focused(SCROLL_STEP) > 0 {
                 panel::request_redraw();
             }
             report();
@@ -306,18 +303,20 @@ fn report() {
     );
 }
 
-/// Scrolls the inventories, and the box as well when it is showing.
+/// Scrolls whichever storage the player is looking at.
+///
+/// With the box open it scrolls the box and nothing else. Scrolling the bags
+/// underneath at the same time read as the two characters' inventories
+/// shuffling while the box sat still — which is exactly how it was reported.
 ///
 /// Returns how many windows moved, so the caller can tell "nothing moved
 /// because everything is already at the end" from "nothing to scroll".
-fn scroll_everything(rows: i32) -> usize {
-    let mut moved = registry::scroll_all(rows);
-
-    if crate::feature::item_box::is_open() && crate::feature::item_box::scroll(rows) {
-        moved += 1;
+fn scroll_focused(rows: i32) -> usize {
+    if crate::feature::item_box::is_open() {
+        return usize::from(crate::feature::item_box::scroll(rows));
     }
 
-    moved
+    registry::scroll_all(rows)
 }
 
 /// Scrolls down a row, starting over from the top at the end of the list.
@@ -326,13 +325,19 @@ fn scroll_everything(rows: i32) -> usize {
 /// mean "show me the next rows", and both need somewhere to go once there are
 /// no next rows left.
 fn scroll_or_wrap() {
-    if scroll_everything(SCROLL_STEP) > 0 {
+    if scroll_focused(SCROLL_STEP) > 0 {
         panel::request_redraw();
         report();
         return;
     }
 
-    if registry::rewind_all() > 0 || crate::feature::item_box::scroll(i32::MIN / 2) {
+    let wrapped = if crate::feature::item_box::is_open() {
+        crate::feature::item_box::scroll(i32::MIN / 2)
+    } else {
+        registry::rewind_all() > 0
+    };
+
+    if wrapped {
         log_info!("Wrapped back to the first slot.");
         panel::request_redraw();
         report();

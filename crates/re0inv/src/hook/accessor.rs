@@ -150,16 +150,21 @@ extern "C" fn player_bag(owner: usize) -> usize {
     resolve(owner, addresses.played_character)
 }
 
-extern "C" fn partner_bag(owner: usize, called_from: usize) -> usize {
-    // The item box takes this panel over while it is showing, but only for the
-    // inventory screen. This same accessor answers questions out in the world —
-    // "does the partner have this key" among them — and those must be answered
-    // about the partner, whatever the panel happens to be displaying.
+extern "C" fn partner_bag(owner: usize, _called_from: usize) -> usize {
+    // While the box is showing it answers for the partner, for every caller.
     //
-    // Deciding by who called is exact. Deciding by a timer was not: at a
-    // typewriter the cursor never moves, so an idle timer closed the box the
-    // instant it opened.
-    if crate::feature::item_box::is_open() && is_menu_code(called_from) {
+    // A caller filter was tried here — answer with the box only for the
+    // inventory screen's own code, so questions asked out in the world stay
+    // about the partner. It broke withdrawing: moving the selection into the
+    // partner's half checks that half has something to select, through a call
+    // site outside every range the filter knew, and with the partner's real
+    // bag empty the selection refused to cross into a box full of items.
+    //
+    // Unconditional is also what the reference mod ships. The exposure is
+    // small and bounded: the box lives for exactly one visit to the inventory
+    // screen, so a world question can only be misanswered while the player is
+    // standing in the menu with the box on screen.
+    if crate::feature::item_box::is_open() {
         let view = crate::feature::item_box::view();
         if !view.is_null() {
             unsafe { crate::hook::panel::redraw_if_requested() };
@@ -256,13 +261,17 @@ fn offset_for_id(id: i32) -> Option<usize> {
     None
 }
 
-/// The box's view, when this call is the screen asking about the other half.
+/// The box's view, when this call asks about the other half.
 ///
 /// "The other half" is any character that is not the one being played. Asking
 /// which character that is costs two calls into the game and only happens while
 /// the box is actually showing.
-fn box_for(character_id: i32, called_from: usize) -> Option<usize> {
-    if !crate::feature::item_box::is_open() || !is_menu_code(called_from) {
+///
+/// No caller filter, same as `partner_bag` and for the same reason: the checks
+/// that let the selection cross into that half come from call sites no filter
+/// managed to enumerate, and refusing them is what made the box read-only.
+fn box_for(character_id: i32, _called_from: usize) -> Option<usize> {
+    if !crate::feature::item_box::is_open() {
         return None;
     }
 

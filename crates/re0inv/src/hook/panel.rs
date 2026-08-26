@@ -160,6 +160,7 @@ const OFFSET_PHASE: usize = 0x294;
 pub const COLUMNS: i32 = 2;
 
 /// One past the highest cursor value the game uses.
+#[allow(dead_code)] // Kept beside set_cursor, which is currently unused too.
 const CURSOR_LIMIT: i32 = 6;
 
 /// The menu object, if the inventory has been drawn at least once.
@@ -190,6 +191,7 @@ pub fn cursor() -> Option<i32> {
 /// open and stops being true at some point after it closes. The value is a
 /// single aligned word, so a stale write lands in freed memory rather than
 /// tearing a structure.
+#[allow(dead_code)] // The follow-the-item scroll was backwards; kept for a future use.
 pub unsafe fn set_cursor(value: i32) -> bool {
     let Some(menu) = menu() else { return false };
 
