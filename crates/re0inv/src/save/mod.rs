@@ -276,10 +276,13 @@ extern "C" fn on_save(slot: u32) {
             stores,
         };
 
-        let carried: usize = data.stores.iter().map(|s| s.items.len()).sum();
+        // Occupied slots, not record length: the records keep every slot so
+        // positions survive, and logging the padding as items reads as loot
+        // appearing out of nowhere.
+        let carried: usize = data.stores.iter().map(|s| occupied(&s.items)).sum();
         log_info!(
             "Saving slot {slot}: {} in the box, {carried} across {} bag(s).",
-            data.box_items.len(),
+            occupied(&data.box_items),
             data.stores.len()
         );
 
@@ -318,7 +321,7 @@ extern "C" fn on_load(slot: u32) {
 
         log_info!(
             "Loading slot {slot}: {} in the box, {} bag(s) to widen.",
-            data.box_items.len(),
+            occupied(&data.box_items),
             data.stores.len()
         );
 
@@ -399,7 +402,7 @@ pub fn settle() {
     }
 
     if let Some((items, _)) = staged.take() {
-        log_info!("The box's {} item(s) restored from the side file.", items.len());
+        log_info!("The box's {} item(s) restored from the side file.", occupied(&items));
         crate::feature::item_box::set_contents(items);
     }
 }
@@ -467,3 +470,8 @@ fn path() -> Option<PathBuf> {
     PATH.lock().ok()?.clone()
 }
 
+
+/// Items actually present in a record, ignoring the empty padding.
+fn occupied(items: &[Item]) -> usize {
+    items.iter().filter(|item| !item.is_empty()).count()
+}
