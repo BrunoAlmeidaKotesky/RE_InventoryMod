@@ -92,29 +92,36 @@ pub fn is_open() -> bool {
     OPEN.load(Ordering::Relaxed)
 }
 
-/// Shows the box, or puts the partner's bag back.
+/// Shows the box.
 ///
-/// Returns the new state. Refuses to open if the box was never set up, which
-/// happens when the feature is switched off.
+/// Never hides it: the key doubles as a stick click, and a stick gets clicked
+/// by accident while navigating with it — which made the box vanish mid-use,
+/// replaced by the partner's real bag. The box closes with the menu, and only
+/// with the menu.
+///
+/// Refuses to open if the box was never set up, which happens when the feature
+/// is switched off.
 pub fn toggle() -> bool {
-    if !is_open() && !exists() {
+    if is_open() {
+        return true;
+    }
+
+    if !exists() {
         log_warn!("The item box is switched off in the configuration.");
         return false;
     }
 
     // The box lives at the typewriter, as it does in the rest of the series.
     // Away from one it cannot be opened at all.
-    if !is_open() && !within_reach() {
+    if !within_reach() {
         log_info!("The item box is only reachable at a typewriter.");
         return false;
     }
 
-    let open = !OPEN.fetch_xor(true, Ordering::Relaxed);
-    log_info!(
-        "Partner panel now showing {}.",
-        if open { "the item box" } else { "the partner's bag" }
-    );
-    open
+    rewind();
+    OPEN.store(true, Ordering::Relaxed);
+    log_info!("Partner panel now showing the item box.");
+    true
 }
 
 /// Shows the box because the player asked for it on the typewriter prompt.

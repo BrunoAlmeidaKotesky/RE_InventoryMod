@@ -344,11 +344,13 @@ fn scroll_or_wrap() {
     }
 }
 
-/// Shows the item box in place of the partner's bag, or puts it back.
+/// Shows the item box in place of the partner's bag.
 ///
-/// The panel is asked to redraw either way: the icons are built when the
-/// inventory opens, so swapping what the panel is showing is exactly the case
-/// that needs one.
+/// Opening only. An open box stays until the menu closes, so an accidental
+/// stick click cannot make it vanish mid-use.
+///
+/// The panel is asked to redraw: the icons are built when the inventory opens,
+/// so swapping what the panel is showing is exactly the case that needs one.
 fn toggle_box() {
     crate::feature::item_box::toggle();
     panel::request_redraw();
