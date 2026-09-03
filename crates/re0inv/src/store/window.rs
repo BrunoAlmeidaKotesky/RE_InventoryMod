@@ -191,6 +191,42 @@ impl Window {
         })
     }
 
+    /// How many of the slots in view are empty.
+    pub fn visible_empty_count(&self) -> usize {
+        self.empty_in_view_at(self.position)
+    }
+
+    /// The position showing the most empty slots at once, and how many.
+    ///
+    /// The current position wins a tie, so the window does not jump when it
+    /// already has the room; otherwise the earliest such position.
+    ///
+    /// This is the most room the game can ever be promised. The store may hold
+    /// more empty slots in total, but the game writes into the six it can see,
+    /// and its own code trusts what `count_empty` said to fit in them.
+    pub fn roomiest_position(&self) -> (usize, usize) {
+        let mut best = (self.position, self.visible_empty_count());
+
+        for position in self.positions() {
+            let count = self.empty_in_view_at(position);
+            if count > best.1 {
+                best = (position, count);
+            }
+        }
+
+        best
+    }
+
+    fn empty_in_view_at(&self, position: usize) -> usize {
+        (0..BAG_SIZE)
+            .filter(|slot| {
+                self.store
+                    .get(position + slot)
+                    .is_none_or(|item| item.is_empty())
+            })
+            .count()
+    }
+
     /// Store index currently shown in visible slot `slot`.
     pub fn store_index(&self, slot: usize) -> Option<usize> {
         (slot < BAG_SIZE).then_some(self.position + slot)
@@ -491,5 +527,34 @@ mod tests {
         assert_eq!(window.visible_slot(9), Some(5));
         assert_eq!(window.visible_slot(3), None);
         assert_eq!(window.visible_slot(10), None);
+    }
+
+    /// Nine items in twelve slots, window on slots 4..10: one empty in view,
+    /// three in the store. The state that once took the game down.
+    fn nine_of_twelve() -> Window {
+        let mut window = Window::new(12);
+        for i in 0..9 {
+            window.store_mut().set(i, item(HERB));
+        }
+        window.set_position(4);
+        window
+    }
+
+    #[test]
+    fn the_roomiest_position_is_where_the_empties_are() {
+        let window = nine_of_twelve();
+
+        assert_eq!(window.visible_empty_count(), 1);
+        assert_eq!(window.roomiest_position(), (6, 3));
+    }
+
+    #[test]
+    fn the_current_position_keeps_a_tie() {
+        let mut window = Window::new(12);
+        window.set_position(4);
+        assert_eq!(window.roomiest_position(), (4, BAG_SIZE));
+
+        let full = filled_window(12);
+        assert_eq!(full.roomiest_position(), (0, 0));
     }
 }

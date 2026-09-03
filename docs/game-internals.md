@@ -628,3 +628,47 @@ Navigation inside the half operates on `menu+0x2BC` (up at `0x005E3BD1`, down
 around `0x005E3C99`, left at `0x005E3D55`, right around `0x005E3Exx`), which is
 also where the earlier finding "menu+0x2B4 is the played half's cursor,
 menu+0x2BC the partner's" comes from.
+
+## Adding an item: `Bag::add_item` at `0x004DB4C0`
+
+Picking an item up ends in `Bag::add_item(this, id, count)`. What it does
+depends on the item's width, from `0x004DC820`:
+
+- Width 2 (`cmp eax, 2` at `0x004DB557`): `count_empty` (`0x004DB55C`) must
+  return at least 2, then `first_empty` (`0x004DB568`) names the slot,
+  `0x004DC240` writes the item there and `organize` (`0x004DA9D0`, called at
+  `0x004DB583`) lays the pair out.
+- Otherwise the slot-finding helper `0x004DAFB0` is used (`0x004DB5BE`,
+  `0x004DB5F3`). It has the same width branch at `0x004DB081`, with
+  `count_empty` at `0x004DB086` and `first_empty` at `0x004DB092`.
+
+`organize` asserts every slot index it computes against six (`cmp esi, 6; jb`
+at `0x004DADC1`, and the same test at `0x004DADA8`, `0x004DADE5`, ...). Failing
+it calls the fatal error routine at `0x00401F50`, which formats a message and
+then writes to address zero on purpose: the process dies with `0xC0000005` at
+`0x00401F78`, `re0hd.exe+0x1F78`. Every "crash" with that offset is one of
+these assertions, not a memory fault.
+
+### The promise the hooks must keep
+
+Both hooked methods answer for a store larger than six, but the game acts on
+the answers inside the six-slot bag it holds. So `count_empty` reports the
+most empty slots any single window position can show, never the store total,
+and a two-slot `first_empty` moves the window to that position before
+answering.
+
+Confirmed the hard way: told 3 with one empty slot in view, `add_item` placed a
+two-slot item in slot 5, `organize` reached for slot 6 and the assertion above
+ended the game. The dump (`re0hd.exe.33708.dmp`) had `esi = 6` and the return
+address `0x004DADD7` live on the stack.
+
+The two-slot request is recognised by its return address, `0x004DB56D` or
+`0x004DB097`. The single-slot requests come from `0x004DB0BC` and from the
+inventory screen at `0x005DA0D8`.
+
+### Reading a crash without a debugger
+
+`tools/mdmp.ps1` reads a Windows minidump (`%LOCALAPPDATA%\CrashDumps`):
+modules, every thread's `eip`/`esp`, the exception and its context, a scan of
+the crashing thread's stack for return addresses into the game or the mod, and
+the printable strings on it. It is how the assertion above was found.

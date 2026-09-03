@@ -149,6 +149,7 @@ pub unsafe fn install_all(addresses: &Addresses) -> Hooks {
         &COUNT_EMPTY_PROLOGUE,
     );
 
+    bag::set_two_slot_callers(addresses.two_slot_first_empty_callers);
     hooks.detour(
         "Bag::first_empty",
         addresses.bag_first_empty,

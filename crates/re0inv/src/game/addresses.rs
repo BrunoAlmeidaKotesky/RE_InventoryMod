@@ -25,6 +25,12 @@ pub struct Addresses {
     pub bag_count_empty: usize,
     /// `int __thiscall(Bag*)` - index of the first empty slot, or -1 if full.
     pub bag_first_empty: usize,
+    /// Return addresses of the calls to `bag_first_empty` made for a two-slot
+    /// item: in `Bag::add_item` (`call` at `0x004DB568`) and in its slot-finding
+    /// helper `0x004DAFB0` (`call` at `0x004DB092`). Both follow `cmp eax, 2` on
+    /// the item's width. A two-slot item is placed differently from a single,
+    /// and the return address is what tells the two requests apart.
+    pub two_slot_first_empty_callers: [usize; 2],
     /// `int __thiscall(Bag*, int id)` - slot holding an item, or -1.
     ///
     /// Every question the game asks about what the player is carrying comes
@@ -163,6 +169,7 @@ pub struct Addresses {
 const JAN_2025: Addresses = Addresses {
     bag_count_empty: 0x004D_B480,
     bag_first_empty: 0x004D_B440,
+    two_slot_first_empty_callers: [0x004D_B56D, 0x004D_B097],
     bag_find_item: 0x004D_B130,
     bag_find_item_continue: 0x004D_B135,
 
