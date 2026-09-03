@@ -75,6 +75,14 @@ Este mod intercepta o mesmo subsistema de inventário que o
 [re0box](https://github.com/descawed/re0box). Os dois não podem rodar juntos;
 trate como mutuamente exclusivos.
 
+## Limitações conhecidas
+
+A rolagem só acontece enquanto você navega na sua própria metade do inventário,
+ou na caixa enquanto uma troca aponta para ela. Dentro do submenu de ação
+(Use, Combine, Examine) o painel fica parado, porque o jogo já anotou qual slot
+você confirmou. Por isso dois itens só combinam quando a mesma página de seis
+slots mostra os dois: role primeiro, combine depois.
+
 ## Créditos e questões legais
 
 O **re0box, de descawed**, é a melhor documentação existente do subsistema de

@@ -672,3 +672,33 @@ inventory screen at `0x005DA0D8`.
 modules, every thread's `eip`/`esp`, the exception and its context, a scan of
 the crashing thread's stack for return addresses into the game or the mod, and
 the printable strings on it. It is how the assertion above was found.
+
+## Menu phases
+
+`+0x294` in the menu object selects the handler through the table at
+`0x5E5794` (`jmp [eax*4+0x5E5794]` at `0x005E1E9D`, twelve entries):
+
+| Phase | Handler | What it is |
+|---|---|---|
+| 0 | `0x005E1EA4` | closed; opening plays the sounds and bumps the phase |
+| 1 | `0x005E1ECF` | opening |
+| 2 | `0x005E1F01` | **browsing the played half**: `0x005E1FE5`-`0x005E2313` steps `+0x2B4` |
+| 3 | `0x005E296A` | the header tabs; `+0x2B0` is the tab cursor, 1 to 5 |
+| 6 | `0x005E2FA5` | exchange, played side |
+| 7 | `0x005E3B74` | exchange, partner side; `+0x2BC` moves, `+0x2B4` is frozen |
+| 9 | `0x005E4953` | leaving |
+| 0xB | `0x005E4BBA` | the action submenu: Use, Combine, Examine, Leave |
+
+Confirming an item in phase 2 (`0x005E3825`) copies `+0x2B4` into `+0x2B8` and
+enters phase 0xB. The submenu's actions work from that copy: the combine code
+at `0x005D97A0` writes counts through `0x004DB8E0` at both `+0x2B4` and
+`+0x2B8`, and choosing Combine sets `+0x2AC = 1`, `+0x290 = 6` and keeps
+picking the second item inside phase 0xB. The description switch at `0x5E582C`
+(indexed by phase minus two) reads the live cursor in phase 2 and the saved
+slot everywhere else.
+
+Both indices are visible slots, 0 to 5. That is the rule for the mod's
+scrolling: the window under the played half may only slide in phase 2. In any
+later phase the game already holds a slot number, and sliding the window under
+it hands Use, Combine and Examine a different item than the one on screen. It
+also means two items can only be combined when the same window shows both.

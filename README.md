@@ -73,6 +73,14 @@ This mod hooks the same inventory subsystem as
 [re0box](https://github.com/descawed/re0box). They cannot run together; treat
 them as mutually exclusive.
 
+## Known limitations
+
+Scrolling only happens while browsing your own half of the inventory, or the
+box while an exchange is aimed at it. Inside the action submenu — Use,
+Combine, Examine — the panel stays put, because the game has already noted
+which slot you confirmed. So two items can only be combined when the same
+six-slot page shows both: scroll first, then combine.
+
 ## Credits and legal
 
 **re0box by descawed** is the best existing documentation of this game's

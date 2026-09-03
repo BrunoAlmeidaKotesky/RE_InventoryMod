@@ -177,29 +177,68 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
     }
 }
 
+/// What a scroll would move right now.
+#[derive(Clone, Copy)]
+enum Target {
+    /// The characters' bags, together.
+    Bags,
+    /// The item box, standing in for the partner's bag.
+    Box,
+}
+
+/// Where a scroll goes at this moment, if anywhere.
+///
+/// Only two phases move a live cursor over a window this mod can slide:
+/// browsing the played half, and choosing the partner-side slot of an
+/// exchange while the box is what the partner's half shows. Everywhere else
+/// the game is holding an index it took earlier — the slot confirmed for the
+/// action submenu, saved at `+0x2B8` — and sliding the window under it hands
+/// Use, Combine and Examine a different item than the one on screen. That is
+/// exactly what happened: pressing down to reach "Examine" scrolled the bag
+/// underneath, and Examine showed whatever had slid under the saved slot.
+///
+/// The partner's real bag is left alone even in its own phase: the saved
+/// slot belongs to the played half, and the bags only scroll together.
+fn scroll_target() -> Option<Target> {
+    match panel::phase()? {
+        panel::PHASE_BROWSING => Some(Target::Bags),
+        panel::PHASE_PARTNER_HALF if crate::feature::item_box::is_open() => Some(Target::Box),
+        _ => None,
+    }
+}
+
+fn scroll_by(target: Target, rows: i32) -> bool {
+    match target {
+        Target::Bags => registry::scroll_all(rows) > 0,
+        Target::Box => crate::feature::item_box::scroll(rows),
+    }
+}
+
+/// Back to the first slot, for carrying on past the end.
+fn rewind(target: Target) -> bool {
+    match target {
+        Target::Bags => registry::rewind_all() > 0,
+        Target::Box => crate::feature::item_box::scroll(i32::MIN / 2),
+    }
+}
+
 /// Scrolls when the selection is pressed against the bottom row.
 ///
-/// Which half the selection is in decides both which cursor to read and what
-/// to scroll. In the partner's half — which is the box, when it is showing —
-/// the game keeps a separate cursor, and the played half's freezes at its last
-/// value; reading the frozen one here is what once made pressing down in the
-/// box shuffle the bags instead.
+/// Which half the selection is in decides which cursor to read: in the
+/// partner's half the game keeps a separate one, and the played half's
+/// freezes at its last value; reading the frozen one here is what once made
+/// pressing down in the box shuffle the bags instead.
 ///
 /// Only downwards. Pressing up on the top row already does something in this
 /// game — it moves to the tabs above the panel — and a binding that fights an
 /// existing one is worse than none. Reaching earlier slots is done by carrying
 /// on down, which wraps around at the end.
 fn try_edge_scroll(cursor: Option<i32>) {
-    if !panel::is_open() {
-        return;
-    }
+    let Some(target) = scroll_target() else { return };
 
-    let in_partner_half = panel::phase() == Some(panel::PHASE_PARTNER_HALF);
-
-    let cursor = if in_partner_half {
-        panel::partner_cursor()
-    } else {
-        cursor
+    let cursor = match target {
+        Target::Box => panel::partner_cursor(),
+        Target::Bags => cursor,
     };
 
     let Some(cursor) = cursor else { return };
@@ -208,23 +247,9 @@ fn try_edge_scroll(cursor: Option<i32>) {
         return;
     }
 
-    let box_focused = in_partner_half && crate::feature::item_box::is_open();
-
-    let moved = if box_focused {
-        crate::feature::item_box::scroll(SCROLL_STEP)
-    } else {
-        registry::scroll_all(SCROLL_STEP) > 0
-    };
-
-    if !moved {
+    if !scroll_by(target, SCROLL_STEP) {
         // Already at the end of the store, so start over from the top.
-        let wrapped = if box_focused {
-            crate::feature::item_box::scroll(i32::MIN / 2)
-        } else {
-            registry::rewind_all() > 0
-        };
-
-        if !wrapped {
+        if !rewind(target) {
             return;
         }
 
@@ -273,13 +298,13 @@ fn dispatch_command(key: i32, ini: &Path, debug_keys: bool) {
     match key {
         VK_HOME => toggle_box(),
         VK_PAGE_UP => {
-            if scroll_focused(-SCROLL_STEP) > 0 {
+            if scroll_focused(-SCROLL_STEP) {
                 panel::request_redraw();
             }
             report();
         }
         VK_PAGE_DOWN => {
-            if scroll_focused(SCROLL_STEP) > 0 {
+            if scroll_focused(SCROLL_STEP) {
                 panel::request_redraw();
             }
             report();
@@ -333,20 +358,12 @@ fn report() {
     );
 }
 
-/// Scrolls whichever storage the player is looking at.
+/// Scrolls whatever the selection is over, if a scroll is allowed now.
 ///
-/// With the box open it scrolls the box and nothing else. Scrolling the bags
-/// underneath at the same time read as the two characters' inventories
-/// shuffling while the box sat still — which is exactly how it was reported.
-///
-/// Returns how many windows moved, so the caller can tell "nothing moved
-/// because everything is already at the end" from "nothing to scroll".
-fn scroll_focused(rows: i32) -> usize {
-    if crate::feature::item_box::is_open() {
-        return usize::from(crate::feature::item_box::scroll(rows));
-    }
-
-    registry::scroll_all(rows)
+/// Returns whether anything moved, so the caller can tell "already at the
+/// end" from "nothing to scroll".
+fn scroll_focused(rows: i32) -> bool {
+    scroll_target().is_some_and(|target| scroll_by(target, rows))
 }
 
 /// Scrolls down a row, starting over from the top at the end of the list.
@@ -355,19 +372,15 @@ fn scroll_focused(rows: i32) -> usize {
 /// mean "show me the next rows", and both need somewhere to go once there are
 /// no next rows left.
 fn scroll_or_wrap() {
-    if scroll_focused(SCROLL_STEP) > 0 {
+    let Some(target) = scroll_target() else { return };
+
+    if scroll_by(target, SCROLL_STEP) {
         panel::request_redraw();
         report();
         return;
     }
 
-    let wrapped = if crate::feature::item_box::is_open() {
-        crate::feature::item_box::scroll(i32::MIN / 2)
-    } else {
-        registry::rewind_all() > 0
-    };
-
-    if wrapped {
+    if rewind(target) {
         log_info!("Wrapped back to the first slot.");
         panel::request_redraw();
         report();

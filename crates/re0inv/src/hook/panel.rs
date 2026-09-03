@@ -169,6 +169,18 @@ const OFFSET_PARTNER_CURSOR: usize = 0x2BC;
 /// The menu phase while the selection is in the partner's half.
 pub const PHASE_PARTNER_HALF: i32 = 7;
 
+/// The menu phase while the selection moves freely over the played half.
+///
+/// From the phase dispatch table at `0x5E5794`: phase 2 runs `0x005E1F01`,
+/// whose movement code (`0x005E1FE5`-`0x005E2313`) is what steps `+0x2B4`.
+/// Confirming an item (`0x005E3825`) copies that cursor to `+0x2B8` and enters
+/// the action submenu, phase 0xB; Use, Combine and Examine work from the
+/// saved copy, and the description switch at `0x5E582C` reads the live cursor
+/// in phase 2 only. So this is the one phase in which the played half's
+/// window may slide without pulling a different item under a slot the game
+/// has already chosen.
+pub const PHASE_BROWSING: i32 = 2;
+
 /// The menu object, if the inventory has been drawn at least once.
 pub fn menu() -> Option<usize> {
     match MENU.load(Ordering::Relaxed) {
