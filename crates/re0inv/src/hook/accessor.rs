@@ -11,6 +11,7 @@
 //! at `+0x20` or `+0x60` of the object it was called on. The two differ only in
 //! which character they ask about.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
 use crate::core::logging::{log_debug, log_warn};
@@ -204,7 +205,9 @@ fn resolve(owner: usize, character_getter: usize) -> usize {
         if view.is_null() {
             // No store available. Fall back on the game's own bag, which leaves
             // that call unmodded rather than broken.
-            log_debug!("No store for 0x{owner:08X}+0x{offset:02X}; using the game's bag.");
+            if should_log() {
+                log_debug!("No store for 0x{owner:08X}+0x{offset:02X}; using the game's bag.");
+            }
             return owner + offset;
         }
 
@@ -240,11 +243,24 @@ fn bag_offset(owner: usize, character_getter: usize, addresses: &Addresses) -> O
     let id = unsafe { thiscall0(addresses.character_id, character) } as i32;
 
     let offset = offset_for_id(id);
-    if offset.is_none() {
+    if offset.is_none() && should_log() {
         log_debug!("Unrecognised character id {id} for owner 0x{owner:08X}.");
     }
 
     offset
+}
+
+/// Fallback lines logged before going quiet.
+///
+/// Both fallbacks sit on the per-frame accessor path, and a log line is a
+/// synchronous file write under the log's lock. Enough to show up, then
+/// silence, like every other per-frame site in the mod.
+const LOG_LIMIT: usize = 8;
+
+static FALLBACK_LOGS: AtomicUsize = AtomicUsize::new(0);
+
+fn should_log() -> bool {
+    FALLBACK_LOGS.fetch_add(1, Ordering::Relaxed) < LOG_LIMIT
 }
 
 /// Which of the two inline bags a character id refers to.

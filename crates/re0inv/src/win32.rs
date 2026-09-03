@@ -128,6 +128,16 @@ extern "system" {
     pub fn GetAsyncKeyState(key: i32) -> i16;
 }
 
+/// Left, top, right, bottom, as `GetClientRect` fills it in.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct Rect {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+}
+
 /// Signature of the callback `EnumWindows` invokes per top-level window.
 /// Returning zero stops the enumeration.
 pub type EnumWindowsProc = unsafe extern "system" fn(window: Handle, parameter: isize) -> Bool;
@@ -145,6 +155,11 @@ extern "system" {
     pub fn GetWindowThreadProcessId(window: Handle, process_id: *mut u32) -> u32;
 
     pub fn IsWindowVisible(window: Handle) -> Bool;
+
+    pub fn GetClientRect(window: Handle, rect: *mut Rect) -> Bool;
+
+    /// Copies the title into `buffer`, returning its length without the nul.
+    pub fn GetWindowTextA(window: Handle, buffer: *mut u8, capacity: i32) -> i32;
 
     /// Whether the window's thread has stopped processing messages for five
     /// seconds: the same test Windows applies before it says "not responding".

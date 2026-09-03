@@ -199,6 +199,14 @@ enum Target {
 ///
 /// The partner's real bag is left alone even in its own phase: the saved
 /// slot belongs to the played half, and the bags only scroll together.
+///
+/// Read here and acted on a moment later, on a different thread from the one
+/// that changes the phase. The game could confirm an item in between, which
+/// would take the phase past two with the scroll still to come. The window
+/// for that is one poll, forty milliseconds, and needs the player to press
+/// confirm and down at the same instant; closing it means sliding the window
+/// from the game's own thread instead, which is a larger change than the
+/// exposure warrants today.
 fn scroll_target() -> Option<Target> {
     match panel::phase()? {
         panel::PHASE_BROWSING => Some(Target::Bags),

@@ -274,6 +274,8 @@ pub fn probe_positions(view: *const Bag, mut ask: impl FnMut() -> i32) -> Option
         storage.window.write_into(&mut bag);
         storage.write(&bag);
 
+        // Safe to hold the lock across: the game's search reaches nothing
+        // hooked (see registry::probe_positions).
         let answer = ask();
         if answer >= 0 {
             return Some(answer);

@@ -608,8 +608,11 @@ pub fn probe_positions(view: *mut Bag, mut ask: impl FnMut() -> i32) -> Option<i
         entry.window.write_into(&mut bag);
         entry.write_view(&bag);
 
-        // The game reads the view we just published. It does not come back
-        // through this mod, so holding the lock across it is safe.
+        // The game reads the view we just published. Holding the lock across
+        // it is safe because nothing it runs is hooked: `Bag::find_item` at
+        // 0x004DB130 calls only the item-kind lookup 0x004DD4D0, its two
+        // searches 0x004DBD60 and 0x004DBDB0, the assert, and the leaf
+        // 0x0059B8D0. See docs/game-internals.md, "Searching the bag".
         let answer = ask();
 
         if answer >= 0 {

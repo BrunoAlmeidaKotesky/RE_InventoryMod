@@ -702,3 +702,39 @@ scrolling: the window under the played half may only slide in phase 2. In any
 later phase the game already holds a slot number, and sliding the window under
 it hands Use, Combine and Examine a different item than the one on screen. It
 also means two items can only be combined when the same window shows both.
+
+### Searching the bag: `Bag::find_item` at `0x004DB130`
+
+The mod's search sweep holds its store lock while calling this function, so
+its call graph matters. It is closed: `0x004DD4D0` (item kind), the two
+narrower searches `0x004DBD60` and `0x004DBDB0`, the assertion routine
+`0x00401F50`, and `0x0059B8D0`, a nine-instruction leaf called from
+`0x004DBE2E`. None of the mod's seven detours is reachable from it, so the
+sweep cannot re-enter the mod on the same thread.
+
+### Which callers may have the window moved
+
+`first_empty` has four callers. Two place a two-slot item and one a single
+item, all inside `add_item` and its helper, and none of them holds another
+slot number across the call:
+
+| Return address | Caller | Item |
+|---|---|---|
+| `0x004DB56D` | `Bag::add_item`, after `cmp eax, 2` | two-slot |
+| `0x004DB097` | helper `0x004DAFB0`, after `cmp eax, 2` | two-slot |
+| `0x004DB0C1` | helper `0x004DAFB0`, single path | single |
+| `0x005DA0DD` | combine, `0x005D97A0` | leftover of a stack |
+
+The fourth is different. The combine code distributes a stack over the six
+visible slots, and if anything is left over it asks `first_empty` for a slot
+(`0x005DA0D8`), writes the remainder there through `0x004DAF30`, and then goes
+back to the source slot it saved at `[esp+0x7C]` (`0x005DA102`) to adjust that
+slot's count. A window that moved during its `first_empty` would put that
+adjustment on whatever slid under the saved slot. So the mod moves the window
+only for the three `add_item` callers, recognised by return address, and
+answers every other caller about the six slots in view.
+
+`count_empty` likewise packs the store to make a pair fit only when asked by
+`add_item`'s two-slot path, return addresses `0x004DB561` and `0x004DB08B`.
+Its two menu callers, `0x005E41F7` and `0x005E4204`, are the exchange size
+checks and never change the store.
