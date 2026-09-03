@@ -227,6 +227,36 @@ impl Window {
             .count()
     }
 
+    /// Packs the store towards the front, keeping the equipped item equipped.
+    ///
+    /// The game's own `organize` does this to the six slots it can see after
+    /// every change; nothing does it to the rest of the store, so a hole left
+    /// on one page stays. Two holes on different pages are two free slots no
+    /// window shows together, which refuses a two-slot item with room to
+    /// spare. Packing is exactly what the game would have done to a six-slot
+    /// bag.
+    ///
+    /// The equipped item is found again by identity afterwards. If the repair
+    /// cannot fit everything — which a valid store of unchanged capacity never
+    /// triggers — nothing is changed, rather than lose an item.
+    pub fn compact(&mut self) {
+        let before = self.store.clone();
+        let equipped = self.equipped.and_then(|index| self.store.get(index));
+
+        if !self.store.repair().is_empty() {
+            self.store = before;
+            return;
+        }
+
+        self.equipped = equipped.and_then(|item| {
+            self.store
+                .as_slice()
+                .iter()
+                .position(|candidate| *candidate == item)
+        });
+        self.position = self.position.min(self.max_position());
+    }
+
     /// Store index currently shown in visible slot `slot`.
     pub fn store_index(&self, slot: usize) -> Option<usize> {
         (slot < BAG_SIZE).then_some(self.position + slot)
@@ -556,5 +586,28 @@ mod tests {
 
         let full = filled_window(12);
         assert_eq!(full.roomiest_position(), (0, 0));
+    }
+
+    #[test]
+    fn compacting_closes_holes_and_keeps_the_equipped_item() {
+        let mut window = Window::new(12);
+        for i in [0, 1, 2, 3, 4, 6, 7, 8, 9, 10] {
+            window.store_mut().set(i, item(HERB + i as i32));
+        }
+        window.set_position(6);
+
+        let mut bag = empty_bag();
+        window.write_into(&mut bag);
+        bag.equipped_index = 2; // store index 8
+        window.read_from(&bag);
+        assert_eq!(window.equipped(), Some(8));
+
+        window.compact();
+
+        assert_eq!(window.store().count_empty(), 2);
+        assert!(window.store().get(10).unwrap().is_empty());
+        assert!(window.store().get(11).unwrap().is_empty());
+        assert_eq!(window.equipped(), Some(7));
+        assert_eq!(window.store().get(7).unwrap(), item(HERB + 8));
     }
 }
