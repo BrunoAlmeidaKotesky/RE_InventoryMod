@@ -148,6 +148,8 @@ Write-Host "Installed: $iniPath" -ForegroundColor Green
 # The mod creates these at runtime; record them so uninstall clears them too.
 $manifest.Created += (Join-Path $GameDir 're0inv.log')
 $manifest.Created += (Join-Path $GameDir 're0hd_text_dump.bin')
+$manifest.Created += (Join-Path $GameDir 're0inv_hang.dmp')
+$manifest.Created += (Join-Path $GameDir 're0inv_hang.txt')
 
 $manifestPath = Join-Path $backupRoot 'manifest.json'
 $manifest | ConvertTo-Json -Depth 5 | Set-Content $manifestPath -Encoding utf8

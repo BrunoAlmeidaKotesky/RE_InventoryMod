@@ -24,7 +24,9 @@ if (-not (Test-Path $manifestPath)) {
         (Join-Path $GameDir 'scripts\re0inv.asi'),
         (Join-Path $GameDir 're0inv.ini'),
         (Join-Path $GameDir 're0inv.log'),
-        (Join-Path $GameDir 're0hd_text_dump.bin')
+        (Join-Path $GameDir 're0hd_text_dump.bin'),
+        (Join-Path $GameDir 're0inv_hang.dmp'),
+        (Join-Path $GameDir 're0inv_hang.txt')
     )
     foreach ($p in $known) {
         if (Test-Path $p) { Remove-Item $p -Force; Write-Host "Removed: $p" }

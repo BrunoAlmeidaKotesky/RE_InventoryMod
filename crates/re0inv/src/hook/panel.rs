@@ -334,6 +334,15 @@ pub fn is_open() -> bool {
     phase().is_some_and(|phase| phase != PHASE_CLOSED)
 }
 
+/// The state of this module's locks, for the hang report.
+pub fn lock_states() -> [(&'static str, &'static str); 2] {
+    use crate::debug::hang::describe_lock;
+    [
+        ("redraw request", describe_lock(&REQUESTED_AT)),
+        ("saved exchange flag", describe_lock(&SAVED_EXCHANGE)),
+    ]
+}
+
 /// How many times the panel has been drawn.
 pub fn draw_count() -> usize {
     DRAWS.load(Ordering::Relaxed)

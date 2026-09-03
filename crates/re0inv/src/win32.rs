@@ -1,6 +1,6 @@
 //! Win32 bindings.
 //!
-//! Declared by hand rather than pulled from a crate. The mod needs nine
+//! Declared by hand rather than pulled from a crate. The mod needs a handful of
 //! functions, and the binding crates reach these through raw-dylib imports,
 //! which the gnu target cannot build here (its bundled dlltool has no
 //! assembler to call). Classic import-library linking has no such problem, and
@@ -126,6 +126,29 @@ extern "system" {
 #[link(name = "user32")]
 extern "system" {
     pub fn GetAsyncKeyState(key: i32) -> i16;
+}
+
+/// Signature of the callback `EnumWindows` invokes per top-level window.
+/// Returning zero stops the enumeration.
+pub type EnumWindowsProc = unsafe extern "system" fn(window: Handle, parameter: isize) -> Bool;
+
+#[link(name = "kernel32")]
+extern "system" {
+    pub fn GetCurrentProcessId() -> u32;
+}
+
+#[link(name = "user32")]
+extern "system" {
+    pub fn EnumWindows(callback: Option<EnumWindowsProc>, parameter: isize) -> Bool;
+
+    /// Returns the thread that owns the window; `process_id` receives its process.
+    pub fn GetWindowThreadProcessId(window: Handle, process_id: *mut u32) -> u32;
+
+    pub fn IsWindowVisible(window: Handle) -> Bool;
+
+    /// Whether the window's thread has stopped processing messages for five
+    /// seconds: the same test Windows applies before it says "not responding".
+    pub fn IsHungAppWindow(window: Handle) -> Bool;
 }
 
 /// Silences an unused-constant warning while PAGE_NOACCESS is only documentation.

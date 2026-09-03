@@ -3,7 +3,8 @@
 # printable strings. Usage:
 #   powershell -File tools\mdmp.ps1 -Path $env:LOCALAPPDATA\CrashDumps\re0hd.exe.NNN.dmp
 #   ... -StringsTid <tid>   printable runs on that thread's stack
-param([Parameter(Mandatory)][string]$Path, [int]$StringsTid = -1, [string[]]$Interesting = @('re0hd.exe','re0inv.asi','re0box.asi','dinput8.dll'))
+#   ... -ScanTid <tid>      scan only that thread (a hang dump has no exception)
+param([Parameter(Mandatory)][string]$Path, [int]$StringsTid = -1, [int]$ScanTid = -1, [string[]]$Interesting = @('re0hd.exe','re0inv.asi','re0box.asi','dinput8.dll'))
 
 $b = [System.IO.File]::ReadAllBytes($Path)
 function U32($o) { [BitConverter]::ToUInt32($b, $o) }
@@ -94,7 +95,7 @@ function ScanStack($t, $limit) {
     }
 }
 
-$targets = if ($excTid -ne $null) { $threads | Where-Object Tid -eq $excTid } else { $threads }
+$targets = if ($ScanTid -ge 0) { $threads | Where-Object Tid -eq $ScanTid } elseif ($excTid -ne $null) { $threads | Where-Object Tid -eq $excTid } else { $threads }
 foreach ($t in $targets) {
     "stack scan tid $($t.Tid):"
     ScanStack $t 40

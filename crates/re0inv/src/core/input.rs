@@ -93,6 +93,7 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
     let mut menu_was_open = false;
 
     loop {
+        crate::debug::hang::beat();
         for (index, &key) in COMMAND_KEYS.iter().enumerate() {
             let down = pressed(key);
 

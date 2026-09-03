@@ -277,6 +277,15 @@ pub fn forget_all() {
     }
 }
 
+/// The state of this module's locks, for the hang report.
+pub fn lock_states() -> [(&'static str, &'static str); 2] {
+    use crate::debug::hang::describe_lock;
+    [
+        ("registry", describe_lock(&REGISTRY)),
+        ("staged restores", describe_lock(&PENDING)),
+    ]
+}
+
 /// Scrolls every store by `rows` rows of two.
 ///
 /// Every store moves together rather than only the panel being looked at. The

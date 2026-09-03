@@ -200,6 +200,15 @@ pub fn exists() -> bool {
     STORAGE.lock().map(|s| s.is_some()).unwrap_or(false)
 }
 
+/// The state of this module's locks, for the hang report.
+pub fn lock_states() -> Vec<(&'static str, &'static str)> {
+    use crate::debug::hang::describe_lock;
+    vec![
+        ("item box", describe_lock(&STORAGE)),
+        ("typewriter sighting", describe_lock(&LAST_TYPEWRITER)),
+    ]
+}
+
 /// The bag to hand the game while the box is showing.
 ///
 /// Returns null when there is no box, which leaves the caller to fall back on

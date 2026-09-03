@@ -100,6 +100,15 @@ fn startup() {
         log_warn!("{}", warning);
     }
 
+    // Before the enabled check: a hang with Mod=0 is as worth a dump as any,
+    // and the watchdog touches nothing the mod would otherwise leave alone.
+    if config.debug.hang_dump {
+        debug::hang::start(
+            resolve(&game_dir, "re0inv_hang.dmp"),
+            resolve(&game_dir, "re0inv_hang.txt"),
+        );
+    }
+
     if !config.enabled {
         log_info!("Disabled by configuration (Mod=0). Nothing will be modified.");
         return;
@@ -263,4 +272,15 @@ fn resolve(game_dir: &Path, path: &str) -> PathBuf {
     } else {
         game_dir.join(candidate)
     }
+}
+
+/// Every lock the mod shares between threads, as the hang watchdog reports it.
+fn lock_states() -> Vec<(&'static str, &'static str)> {
+    let mut states = vec![("log", logging::lock_state())];
+    states.extend(store::registry::lock_states());
+    states.extend(hook::panel::lock_states());
+    states.extend(feature::item_box::lock_states());
+    #[cfg(any(feature = "expanded", feature = "itembox"))]
+    states.extend(save::lock_states());
+    states
 }

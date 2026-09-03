@@ -373,6 +373,11 @@ fn discard_staged_box() {
     }
 }
 
+/// The state of this module's locks, for the hang report.
+pub fn lock_states() -> [(&'static str, &'static str); 1] {
+    [("staged box", crate::debug::hang::describe_lock(&STAGED_BOX))]
+}
+
 /// Applies the staged box contents once the bags have vouched for the file.
 ///
 /// Polled from the input thread. Doing nothing is the common case and costs a

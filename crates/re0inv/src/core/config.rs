@@ -58,6 +58,8 @@ pub struct DebugConfig {
     pub dump_path: String,
     /// Enables the hotkey-driven memory probe.
     pub probe: bool,
+    /// Write a dump beside the game when its window stops responding.
+    pub hang_dump: bool,
     /// Value the probe searches for. Re-read on every hotkey press.
     pub probe_value: i32,
 }
@@ -81,6 +83,7 @@ impl Default for Config {
                 dump_text: false,
                 dump_path: "re0hd_text_dump.bin".to_string(),
                 probe: false,
+                hang_dump: true,
                 probe_value: 0,
             },
         }
@@ -139,6 +142,9 @@ impl Config {
         }
         if let Some(v) = get("probe") {
             cfg.debug.probe = parse_bool(v, cfg.debug.probe);
+        }
+        if let Some(v) = get("hangdump") {
+            cfg.debug.hang_dump = parse_bool(v, cfg.debug.hang_dump);
         }
         if let Some(v) = get("probevalue") {
             cfg.debug.probe_value = parse_i32(v).unwrap_or(cfg.debug.probe_value);

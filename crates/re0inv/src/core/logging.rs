@@ -89,3 +89,11 @@ macro_rules! log_info  { ($($a:tt)*) => { $crate::core::logging::write($crate::c
 macro_rules! log_debug { ($($a:tt)*) => { $crate::core::logging::write($crate::core::logging::Level::Debug, format_args!($($a)*)) } }
 
 pub(crate) use {log_debug, log_error, log_info, log_warn};
+
+/// The state of the log file's lock, for the hang report.
+pub fn lock_state() -> &'static str {
+    match LOGGER.get() {
+        Some(logger) => crate::debug::hang::describe_lock(&logger.file),
+        None => "uninitialised",
+    }
+}
