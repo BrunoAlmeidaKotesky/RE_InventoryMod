@@ -69,8 +69,12 @@ const POLL_INTERVAL: Duration = Duration::from_millis(40);
 const SCROLL_STEP: i32 = 1;
 
 pub fn run(ini: PathBuf, debug_keys: bool) {
-    log_info!("Inventory scrolling: press down on the bottom row, or click the right stick.");
-    log_info!("Page Up and Page Down also scroll it directly.");
+    #[cfg(any(feature = "expanded", feature = "itembox"))]
+    {
+        log_info!("Inventory scrolling: press down on the bottom row, or click the right stick.");
+        log_info!("Page Up and Page Down also scroll it directly.");
+    }
+    #[cfg(feature = "itembox")]
     log_info!("Item box: choose it on the typewriter prompt, or press Home in the inventory.");
     if debug_keys {
         log_info!("Debug keys: F7 selection scan, F8 remove hooks, F9 scan, F10 narrow, F11 inspect, F12 memory map.");

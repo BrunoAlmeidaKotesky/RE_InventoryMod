@@ -134,6 +134,7 @@ fn startup() {
         None => log_warn!("Could not identify the game build."),
     }
 
+    #[cfg(feature = "expanded")]
     log_info!("Configured inventory slots: {}.", config.slots);
 
     if config.debug.dump_text {
