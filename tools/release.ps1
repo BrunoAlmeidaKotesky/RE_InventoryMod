@@ -169,6 +169,13 @@ Configuracoes em re0inv.ini. Mod=0 desativa sem desinstalar.
     Write-Host ("Packaged {0} ({1:N0} bytes)" -f $zip, (Get-Item $zip).Length) -ForegroundColor Green
 }
 
+# The loop leaves the last variant's DLL in target\, and install.ps1 copies
+# whatever is there: a dev install right after a release shipped the door skip
+# alone. Rebuild the full mod so target\ holds what a developer expects.
+Write-Host 'Restoring the default build...' -ForegroundColor Cyan
+& cargo $Toolchain build -q --release --target $Target -p re0inv
+if ($LASTEXITCODE -ne 0) { throw "default build failed (exit $LASTEXITCODE)" }
+
 Write-Host ''
 Write-Host "Packages in $dist" -ForegroundColor Cyan
 Write-Host "Publish with: gh release create v$version dist\*.zip --title `"v$version`" --generate-notes" -ForegroundColor DarkGray
