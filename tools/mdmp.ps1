@@ -98,7 +98,7 @@ function ScanStack($t, $limit) {
 $targets = if ($ScanTid -ge 0) { $threads | Where-Object Tid -eq $ScanTid } elseif ($excTid -ne $null) { $threads | Where-Object Tid -eq $excTid } else { $threads }
 foreach ($t in $targets) {
     "stack scan tid $($t.Tid):"
-    ScanStack $t 40
+    ScanStack $t 90
 }
 
 # Printable ASCII runs on one thread's stack, for reading formatted messages.
