@@ -313,6 +313,13 @@ pub fn scroll(rows: i32) -> bool {
     true
 }
 
+/// The item showing in visible slot `slot` of the box.
+pub fn item_in_view(slot: usize) -> Option<Item> {
+    let storage = STORAGE.lock().ok()?;
+    let storage = storage.as_ref()?;
+    storage.read().items.get(slot).copied()
+}
+
 /// Where the window sits and how much of the box is free, for logging.
 pub fn state() -> Option<(usize, usize, usize)> {
     let storage = STORAGE.lock().ok()?;

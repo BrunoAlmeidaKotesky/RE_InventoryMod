@@ -698,10 +698,20 @@ picking the second item inside phase 0xB. The description switch at `0x5E582C`
 slot everywhere else.
 
 Both indices are visible slots, 0 to 5. That is the rule for the mod's
-scrolling: the window under the played half may only slide in phase 2. In any
-later phase the game already holds a slot number, and sliding the window under
-it hands Use, Combine and Examine a different item than the one on screen. It
-also means two items can only be combined when the same window shows both.
+scrolling: the window under the played half slides freely in phase 2 only. In
+any later phase the game already holds a slot number, and sliding the window
+under it hands Use, Combine and Examine a different item than the one on
+screen. While a second item is being chosen (`+0x290 = 6`), the mod holds the
+row of the saved slot in place and scrolls the other two rows over the rest
+of the store, so the saved slot keeps naming the first item wherever the
+second one is.
+
+One more consequence of sliding items under a still selection: the game never
+lets the selection rest on the tail of a two-slot item (its moves pull it onto
+the head at `0x005E2066` and note the column in `+0x2C4`), and examining the
+tail asks the item table about the filler, id 180, which fails the bounds
+assertion at `0x005F5ABE` and ends the game. After every scroll the mod checks
+the slot under the selection and pulls it left the same way.
 
 ### Searching the bag: `Bag::find_item` at `0x004DB130`
 

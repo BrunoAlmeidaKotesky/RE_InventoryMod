@@ -77,11 +77,12 @@ trate como mutuamente exclusivos.
 
 ## Limitações conhecidas
 
-A rolagem só acontece enquanto você navega na sua própria metade do inventário,
-ou na caixa enquanto uma troca aponta para ela. Dentro do submenu de ação
-(Use, Combine, Examine) o painel fica parado, porque o jogo já anotou qual slot
-você confirmou. Por isso dois itens só combinam quando a mesma página de seis
-slots mostra os dois: role primeiro, combine depois.
+A rolagem acontece enquanto você navega na sua própria metade do inventário,
+enquanto escolhe o segundo item de um Combine, e na caixa enquanto uma troca
+aponta para ela. Durante a escolha do segundo item, a linha do primeiro item
+fica parada na tela e as outras duas linhas rolam por ela: o jogo lembra desse
+item pelo slot, então o slot não pode se mover. No resto do submenu de ação o
+painel fica parado.
 
 ## Créditos e questões legais
 

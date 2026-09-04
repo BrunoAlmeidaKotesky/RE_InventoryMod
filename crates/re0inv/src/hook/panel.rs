@@ -181,6 +181,26 @@ pub const PHASE_PARTNER_HALF: i32 = 7;
 /// has already chosen.
 pub const PHASE_BROWSING: i32 = 2;
 
+/// The action submenu: Use, Combine, Examine, Leave. Phase 0xB in the table.
+pub const PHASE_ACTIONS: i32 = 0xB;
+
+/// The slot confirmed for the action submenu, `menu+0x2B8`. Copied from the
+/// cursor at `0x005E382B`, read by every action in place of the live cursor.
+const OFFSET_SAVED_SLOT: usize = 0x2B8;
+
+/// The submenu's sub-state, `menu+0x290`. Six means a second item is being
+/// chosen: Combine sets it at `0x005E2E49` (with `+0x2AC = 1`), the exchange
+/// action at `0x005E2EB3` (with `+0x2AC = 2`). Both read the saved slot
+/// above when the second item is confirmed, wherever the selection went in
+/// between.
+const OFFSET_SUB_STATE: usize = 0x290;
+pub const SUB_STATE_SECOND_ITEM: i32 = 6;
+
+/// Set with the cursor when the game pulls it left onto the head of a
+/// two-slot item (`0x005E206C`): the column the player actually wanted, which
+/// the next vertical move restores.
+const OFFSET_COLUMN_PREFERENCE: usize = 0x2C4;
+
 /// The menu object, if the inventory has been drawn at least once.
 pub fn menu() -> Option<usize> {
     match MENU.load(Ordering::Relaxed) {
@@ -344,6 +364,59 @@ const PHASE_CLOSED: i32 = 0;
 /// selection had not moved for a while, which at a typewriter is always true.
 pub fn is_open() -> bool {
     phase().is_some_and(|phase| phase != PHASE_CLOSED)
+}
+
+/// The slot the action submenu is working on.
+pub fn saved_slot() -> Option<i32> {
+    let menu = menu()?;
+    crate::debug::memory::read_i32(menu + OFFSET_SAVED_SLOT)
+}
+
+/// The submenu's sub-state; see `SUB_STATE_SECOND_ITEM`.
+pub fn sub_state() -> Option<i32> {
+    let menu = menu()?;
+    crate::debug::memory::read_i32(menu + OFFSET_SUB_STATE)
+}
+
+/// Moves the played half's selection one slot left, onto the head of a
+/// two-slot item whose tail it is resting on.
+///
+/// The game never lets the selection rest on a tail: its own moves pull it
+/// onto the head (`0x005E2066`) and remember the column (`+0x2C4`). Sliding
+/// the window under a still selection can leave it on a tail, and examining
+/// or using the tail asks the item table about the filler, id 180, which is
+/// past its end (`0x005F5ABE`) and ends the game. Done the way the game does
+/// it, so its next move behaves as if it had pulled the selection itself.
+///
+/// # Safety
+/// The inventory screen must be up, so the menu object is alive.
+pub unsafe fn pull_cursor_left() {
+    let Some(menu) = menu() else { return };
+
+    let cursor = (menu + OFFSET_CURSOR) as *mut i32;
+    let value = cursor.read_volatile();
+    if value <= 0 {
+        return;
+    }
+
+    cursor.write_volatile(value - 1);
+    ((menu + OFFSET_COLUMN_PREFERENCE) as *mut u8).write_volatile(1);
+}
+
+/// The same for the partner half's selection.
+///
+/// # Safety
+/// As `pull_cursor_left`.
+pub unsafe fn pull_partner_cursor_left() {
+    let Some(menu) = menu() else { return };
+
+    let cursor = (menu + OFFSET_PARTNER_CURSOR) as *mut i32;
+    let value = cursor.read_volatile();
+    if value <= 0 {
+        return;
+    }
+
+    cursor.write_volatile(value - 1);
 }
 
 /// The state of this module's locks, for the hang report.

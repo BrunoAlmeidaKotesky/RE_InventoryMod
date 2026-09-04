@@ -323,6 +323,49 @@ pub fn scroll_all(rows: i32) -> usize {
     moved
 }
 
+// --- Holding a row still for the inventory's two-item actions ---
+
+/// Runs `action` on every store at bag offset `offset`, through the usual
+/// read-back and publish, and reports whether any store was found.
+fn with_offset(offset: usize, mut action: impl FnMut(&mut Window)) -> bool {
+    let Ok(mut registry) = REGISTRY.lock() else {
+        return false;
+    };
+
+    let mut found = false;
+
+    for entry in registry.entries.iter_mut().filter(|e| e.offset == offset) {
+        let mut bag = entry.read_view();
+        entry.window.read_from(&bag);
+        action(&mut entry.window);
+        entry.window.write_into(&mut bag);
+        entry.write_view(&bag);
+        found = true;
+    }
+
+    found
+}
+
+/// Holds the visible row `visible_row` of the bag at `offset` in place.
+pub fn pin_row(offset: usize, visible_row: usize) -> bool {
+    with_offset(offset, |window| window.pin_row(visible_row))
+}
+
+/// Releases the held row of the bag at `offset`, keeping visible slot `keep`
+/// showing what it shows now where possible.
+pub fn unpin(offset: usize, keep: Option<usize>) -> bool {
+    with_offset(offset, |window| window.unpin(keep))
+}
+
+/// The item showing in visible slot `slot` of the bag at `offset`.
+pub fn item_in_view(offset: usize, slot: usize) -> Option<Item> {
+    let registry = REGISTRY.lock().ok()?;
+
+    let entry = registry.entries.iter().find(|e| e.offset == offset)?;
+    let index = entry.window.store_index(slot)?;
+    entry.window.store().get(index)
+}
+
 /// Where each store's window sits, and what it is showing, for logging.
 pub fn positions() -> Vec<(usize, usize, usize, usize)> {
     match REGISTRY.lock() {

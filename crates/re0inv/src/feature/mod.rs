@@ -62,6 +62,10 @@ pub mod item_box {
 
     pub fn set_contents(_items: Vec<Item>) {}
 
+    pub fn item_in_view(_slot: usize) -> Option<Item> {
+        None
+    }
+
     pub fn lock_states() -> Vec<(&'static str, &'static str)> {
         Vec::new()
     }

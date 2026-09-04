@@ -75,11 +75,12 @@ them as mutually exclusive.
 
 ## Known limitations
 
-Scrolling only happens while browsing your own half of the inventory, or the
-box while an exchange is aimed at it. Inside the action submenu — Use,
-Combine, Examine — the panel stays put, because the game has already noted
-which slot you confirmed. So two items can only be combined when the same
-six-slot page shows both: scroll first, then combine.
+Scrolling happens while browsing your own half of the inventory, while
+choosing the second item of a Combine, and in the box while an exchange is
+aimed at it. While the second item is being chosen, the row holding the first
+item stays where it is on screen and the other two rows scroll past it: the
+game remembers that item by its slot, so its slot cannot move. Elsewhere in
+the action submenu the panel stays put.
 
 ## Credits and legal
 

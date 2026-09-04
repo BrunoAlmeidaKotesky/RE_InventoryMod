@@ -15,9 +15,23 @@ use crate::store::slots::Slots;
 /// What the game stores in the equipped index when nothing is equipped.
 const NOTHING_EQUIPPED: i32 = -1;
 
+/// Rows in the window. Two slots each.
+const ROWS: usize = BAG_SIZE / 2;
+
+/// A visible row held on one store row while the other rows keep sliding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Pin {
+    visible_row: usize,
+    store_row: usize,
+}
+
 pub struct Window {
     store: Slots,
     /// First store index the game can see. Always even.
+    ///
+    /// While a row is pinned, this counts through the store's rows with the
+    /// pinned one left out, so the two free rows show consecutive rows of
+    /// everything else; the bounds are unchanged either way.
     position: usize,
     /// Store index of the equipped item, if anything is equipped.
     ///
@@ -26,6 +40,7 @@ pub struct Window {
     /// underneath it without translating leaves the game holding a slot number
     /// that now points at a different item, or at nothing.
     equipped: Option<usize>,
+    pin: Option<Pin>,
 }
 
 impl Window {
@@ -34,6 +49,7 @@ impl Window {
             store: Slots::new(capacity),
             position: 0,
             equipped: None,
+            pin: None,
         }
     }
 
@@ -103,6 +119,18 @@ impl Window {
 
     /// Jumps so that `index` is visible, keeping the window even-aligned.
     pub fn reveal(&mut self, index: usize) {
+        if self.pin.is_some() {
+            if self.visible_slot(index).is_none() {
+                if let Some(position) = self
+                    .positions()
+                    .find(|&position| self.visible_slot_at(position, index).is_some())
+                {
+                    self.position = position;
+                }
+            }
+            return;
+        }
+
         if index < self.position {
             self.position = index & !1;
             return;
@@ -145,9 +173,11 @@ impl Window {
     /// view the game is told nothing is equipped, which is the only honest
     /// answer available in six slots.
     pub fn write_into(&self, bag: &mut Bag) {
-        let visible = self.store.view(self.position, BAG_SIZE);
-        for (slot, item) in bag.items.iter_mut().zip(visible) {
-            *slot = item;
+        for slot in 0..BAG_SIZE {
+            bag.items[slot] = self
+                .store_index(slot)
+                .and_then(|index| self.store.get(index))
+                .unwrap_or(Item::EMPTY);
         }
 
         bag.equipped_index = self
@@ -158,12 +188,16 @@ impl Window {
 
     /// Copies whatever the game left in the bag back into the store.
     pub fn read_from(&mut self, bag: &Bag) {
-        self.store.write_back(self.position, &bag.items);
+        for slot in 0..BAG_SIZE {
+            if let Some(index) = self.store_index(slot) {
+                self.store.set(index, bag.items[slot]);
+            }
+        }
 
         let slot = bag.equipped_index;
 
         if (0..BAG_SIZE as i32).contains(&slot) {
-            self.equipped = Some(self.position + slot as usize);
+            self.equipped = self.store_index(slot as usize);
             return;
         }
 
@@ -184,11 +218,13 @@ impl Window {
     /// This is what a caller can safely be told to write into: the game can
     /// only address the six slots it has.
     pub fn first_visible_empty(&self) -> Option<usize> {
-        (0..BAG_SIZE).find(|slot| {
-            self.store
-                .get(self.position + slot)
-                .is_none_or(|item| item.is_empty())
-        })
+        (0..BAG_SIZE).find(|&slot| self.slot_is_empty_at(self.position, slot))
+    }
+
+    fn slot_is_empty_at(&self, position: usize, slot: usize) -> bool {
+        self.store_index_at(position, slot)
+            .and_then(|index| self.store.get(index))
+            .is_none_or(|item| item.is_empty())
     }
 
     /// How many of the slots in view are empty.
@@ -219,11 +255,7 @@ impl Window {
 
     fn empty_in_view_at(&self, position: usize) -> usize {
         (0..BAG_SIZE)
-            .filter(|slot| {
-                self.store
-                    .get(position + slot)
-                    .is_none_or(|item| item.is_empty())
-            })
+            .filter(|&slot| self.slot_is_empty_at(position, slot))
             .count()
     }
 
@@ -240,6 +272,10 @@ impl Window {
     /// cannot fit everything — which a valid store of unchanged capacity never
     /// triggers — nothing is changed, rather than lose an item.
     pub fn compact(&mut self) {
+        // Nothing holds a slot number across a pickup, and a held row would
+        // point at whatever the packing moved there.
+        self.pin = None;
+
         let before = self.store.clone();
         let equipped = self.equipped.and_then(|index| self.store.get(index));
 
@@ -259,14 +295,128 @@ impl Window {
 
     /// Store index currently shown in visible slot `slot`.
     pub fn store_index(&self, slot: usize) -> Option<usize> {
-        (slot < BAG_SIZE).then_some(self.position + slot)
+        self.store_index_at(self.position, slot)
     }
 
     /// Visible slot showing store index `index`, if it is in view.
     pub fn visible_slot(&self, index: usize) -> Option<usize> {
-        index
-            .checked_sub(self.position)
-            .filter(|offset| *offset < BAG_SIZE)
+        self.visible_slot_at(self.position, index)
+    }
+
+    /// Store index that visible slot `slot` would show at `position`.
+    ///
+    /// Without a pin the window is six consecutive slots. With one, the pinned
+    /// visible row always shows the pinned store row, and the other two show
+    /// consecutive rows of the store with the pinned row left out, counted
+    /// from `position`.
+    fn store_index_at(&self, position: usize, slot: usize) -> Option<usize> {
+        if slot >= BAG_SIZE {
+            return None;
+        }
+
+        let (row, column) = (slot / 2, slot % 2);
+
+        let Some(pin) = self.pin else {
+            return Some(position + slot);
+        };
+
+        if row == pin.visible_row {
+            return Some(pin.store_row * 2 + column);
+        }
+
+        let order = if row < pin.visible_row { row } else { row - 1 };
+        let sequence_row = position / 2 + order;
+        let store_row = if sequence_row < pin.store_row {
+            sequence_row
+        } else {
+            sequence_row + 1
+        };
+
+        Some(store_row * 2 + column)
+    }
+
+    /// Visible slot that store index `index` would take at `position`.
+    fn visible_slot_at(&self, position: usize, index: usize) -> Option<usize> {
+        let Some(pin) = self.pin else {
+            return index
+                .checked_sub(position)
+                .filter(|offset| *offset < BAG_SIZE);
+        };
+
+        let (row, column) = (index / 2, index % 2);
+
+        if row == pin.store_row {
+            return Some(pin.visible_row * 2 + column);
+        }
+
+        let sequence_row = if row < pin.store_row { row } else { row - 1 };
+        let order = sequence_row.checked_sub(position / 2)?;
+        if order >= ROWS - 1 {
+            return None;
+        }
+
+        let visible_row = if order < pin.visible_row { order } else { order + 1 };
+        Some(visible_row * 2 + column)
+    }
+
+    /// Holds visible row `visible_row` on the store row it shows now, while
+    /// the other rows keep scrolling over the rest of the store.
+    ///
+    /// For the inventory's two-item actions. Confirming the first item saves
+    /// its visible slot in the menu, and the action later reads both slots
+    /// from the six the game can see. Scrolling to reach a second item
+    /// anywhere else in the store would slide a different item under the
+    /// saved slot — unless that slot's row stays where it is. So it does.
+    ///
+    /// The first unpinned row keeps showing what it shows now, so nothing
+    /// visibly jumps at the moment of pinning.
+    pub fn pin_row(&mut self, visible_row: usize) {
+        if visible_row >= ROWS || self.pin.is_some() {
+            return;
+        }
+
+        let store_row = self.position / 2 + visible_row;
+        let first_other = usize::from(visible_row == 0);
+        let shown = self.position / 2 + first_other;
+        let sequence_row = if shown < store_row { shown } else { shown - 1 };
+
+        self.pin = Some(Pin {
+            visible_row,
+            store_row,
+        });
+        self.position = (sequence_row * 2).min(self.max_position());
+    }
+
+    pub fn is_pinned(&self) -> bool {
+        self.pin.is_some()
+    }
+
+    /// Releases the held row.
+    ///
+    /// `keep` names a visible slot whose item should stay where it is on
+    /// screen, if the plain window can show it there; otherwise the item is
+    /// merely kept in view.
+    pub fn unpin(&mut self, keep: Option<usize>) {
+        if self.pin.is_none() {
+            return;
+        }
+
+        let kept = keep.and_then(|slot| self.store_index(slot).map(|index| (slot, index)));
+        self.pin = None;
+
+        match kept {
+            Some((slot, index)) => {
+                let same_place = index
+                    .checked_sub(slot)
+                    .filter(|position| position.is_multiple_of(2) && *position <= self.max_position());
+
+                match same_place {
+                    Some(position) => self.position = position,
+                    None => self.reveal(index),
+                }
+            }
+            None => self.position = self.position.min(self.max_position()),
+        }
     }
 
     /// Repairs the store, then moves the window back into range.
@@ -609,5 +759,107 @@ mod tests {
         assert!(window.store().get(11).unwrap().is_empty());
         assert_eq!(window.equipped(), Some(7));
         assert_eq!(window.store().get(7).unwrap(), item(HERB + 8));
+    }
+
+    /// Twelve slots holding their own index as id, so a slot's origin is
+    /// readable from its id.
+    fn numbered(capacity: usize) -> Window {
+        let mut window = Window::new(capacity);
+        for i in 0..capacity {
+            window.store_mut().set(i, item(i as i32));
+        }
+        window
+    }
+
+    fn shown(window: &Window) -> Vec<i32> {
+        let mut bag = empty_bag();
+        window.write_into(&mut bag);
+        bag.items.iter().map(|item| item.id).collect()
+    }
+
+    #[test]
+    fn pinning_keeps_the_row_while_the_rest_scrolls() {
+        let mut window = numbered(12);
+        window.pin_row(1);
+
+        // Nothing jumps at the moment of pinning.
+        assert_eq!(shown(&window), vec![0, 1, 2, 3, 4, 5]);
+
+        assert!(window.scroll_rows(1));
+        assert_eq!(shown(&window), vec![4, 5, 2, 3, 6, 7]);
+
+        assert!(window.scroll_rows(99));
+        assert_eq!(shown(&window), vec![8, 9, 2, 3, 10, 11]);
+        assert_eq!(window.position(), window.max_position());
+
+        // Both directions of the mapping agree everywhere.
+        for slot in 0..BAG_SIZE {
+            let index = window.store_index(slot).unwrap();
+            assert_eq!(window.visible_slot(index), Some(slot));
+        }
+        assert_eq!(window.visible_slot(2), Some(2));
+        assert_eq!(window.visible_slot(0), None);
+    }
+
+    #[test]
+    fn a_pinned_window_reads_back_into_the_right_slots() {
+        let mut window = numbered(12);
+        window.pin_row(0);
+        window.scroll_rows(2);
+        assert_eq!(shown(&window), vec![0, 1, 6, 7, 8, 9]);
+
+        let mut bag = empty_bag();
+        window.write_into(&mut bag);
+        bag.items[1] = item(SHOTGUN);
+        bag.items[5] = item(HERB);
+        window.read_from(&bag);
+
+        assert_eq!(window.store().get(1).unwrap(), item(SHOTGUN));
+        assert_eq!(window.store().get(9).unwrap(), item(HERB));
+        assert_eq!(window.store().get(3).unwrap(), item(3));
+    }
+
+    #[test]
+    fn unpinning_keeps_the_kept_slot_where_it_is() {
+        let mut window = numbered(12);
+        window.pin_row(1);
+        window.scroll_rows(99);
+        assert_eq!(shown(&window), vec![8, 9, 2, 3, 10, 11]);
+
+        // Slot 4 shows store index 10; the plain window at position 6 too.
+        window.unpin(Some(4));
+        assert!(!window.is_pinned());
+        assert_eq!(window.position(), 6);
+        assert_eq!(shown(&window), vec![6, 7, 8, 9, 10, 11]);
+
+        let mut again = numbered(12);
+        again.pin_row(2);
+        again.scroll_rows(99);
+        // Slot 4 is the pinned row: store index 4 cannot sit at slot 4 with an
+        // even position past zero, so it is merely kept in view.
+        again.unpin(Some(4));
+        assert!(again.visible_slot(4).is_some());
+    }
+
+    #[test]
+    fn pinning_covers_every_row_of_a_six_slot_store() {
+        let mut window = numbered(6);
+        window.pin_row(2);
+        assert_eq!(shown(&window), vec![0, 1, 2, 3, 4, 5]);
+        assert!(!window.scroll_rows(1));
+    }
+
+    #[test]
+    fn pinned_empties_and_reveal_use_the_same_mapping() {
+        let mut window = numbered(12);
+        // Id zero is the empty item; give slot 0 a real one.
+        window.store_mut().set(0, item(HERB));
+        window.store_mut().set(11, Item::EMPTY);
+        window.pin_row(0);
+
+        assert_eq!(window.first_visible_empty(), None);
+        window.reveal(11);
+        assert_eq!(window.visible_slot(11), Some(5));
+        assert_eq!(window.first_visible_empty(), Some(5));
     }
 }

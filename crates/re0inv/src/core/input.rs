@@ -19,6 +19,7 @@
 //! this into the game's input handling eventually.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crate::core::gamepad::{
@@ -26,7 +27,7 @@ use crate::core::gamepad::{
 };
 use crate::core::logging::{log_debug, log_info};
 use crate::debug::probe;
-use crate::game::inventory::BAG_SIZE;
+use crate::game::inventory::{BAG_SIZE, SLOT_TWO_FILLER};
 use crate::hook::panel;
 use crate::store::registry;
 use crate::win32::{GetAsyncKeyState, KEY_PRESSED};
@@ -91,6 +92,8 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
     let mut last_cursor: Option<i32> = None;
     let mut last_phase: Option<i32> = None;
     let mut menu_was_open = false;
+    // The bag offset whose row is being held, while one is.
+    let mut held_row: Option<usize> = None;
 
     loop {
         crate::debug::hang::beat();
@@ -140,6 +143,21 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
             crate::feature::item_box::close_with_menu();
         }
         menu_was_open = menu_open;
+
+        // While a second item is being chosen, the first one's row is held
+        // still, so the slot the game saved keeps naming it however far the
+        // rest of the store scrolls. Released the moment the choice is over.
+        let choosing_second =
+            menu_open && panel::sub_state() == Some(panel::SUB_STATE_SECOND_ITEM);
+        if choosing_second && held_row.is_none() {
+            held_row = hold_first_item();
+        } else if !choosing_second {
+            if let Some(offset) = held_row.take() {
+                registry::unpin(offset, panel::cursor().and_then(|c| usize::try_from(c).ok()));
+                log_info!("The held row is released.");
+            }
+        }
+        ROW_HELD.store(held_row.is_some(), Ordering::Relaxed);
 
         let down = holding_down(&controller, &mut pad_seen);
 
@@ -210,8 +228,75 @@ enum Target {
 fn scroll_target() -> Option<Target> {
     match panel::phase()? {
         panel::PHASE_BROWSING => Some(Target::Bags),
+        // Choosing the second item of a Combine: allowed once the first
+        // item's row is held still, which is what keeps the saved slot true.
+        panel::PHASE_ACTIONS if ROW_HELD.load(Ordering::Relaxed) => Some(Target::Bags),
         panel::PHASE_PARTNER_HALF if crate::feature::item_box::is_open() => Some(Target::Box),
         _ => None,
+    }
+}
+
+/// Whether a row of the played bag is currently held still.
+static ROW_HELD: AtomicBool = AtomicBool::new(false);
+
+/// Holds the confirmed item's row; returns the bag offset it was held in.
+fn hold_first_item() -> Option<usize> {
+    let offset = crate::hook::accessor::played_offset()?;
+    let saved = usize::try_from(panel::saved_slot()?).ok()?;
+
+    if !registry::pin_row(offset, saved / 2) {
+        return None;
+    }
+
+    log_info!(
+        "Choosing a second item: row {} stays put while the rest of the bag scrolls.",
+        saved / 2 + 1
+    );
+    Some(offset)
+}
+
+/// What every scroll ends with: the selection checked against what slid
+/// under it, the panel redrawn, the log told.
+fn after_scroll(target: Target) {
+    settle_cursor(target);
+    panel::request_redraw();
+    report();
+}
+
+/// Pulls the selection off the tail of a two-slot item the scroll left it on.
+///
+/// The game never lets the selection rest on a tail; a window sliding under
+/// a still selection can. Examining the tail asks the item table about the
+/// filler, which ends the game, so the selection is pulled onto the head the
+/// way the game's own moves do it.
+fn settle_cursor(target: Target) {
+    let slot = |cursor: Option<i32>| cursor.and_then(|c| usize::try_from(c).ok());
+
+    let on_tail = match target {
+        Target::Bags => {
+            let Some(offset) = crate::hook::accessor::played_offset() else { return };
+            let Some(cursor) = slot(panel::cursor()) else { return };
+            registry::item_in_view(offset, cursor).is_some_and(|item| item.id == SLOT_TWO_FILLER)
+        }
+        Target::Box => {
+            let Some(cursor) = slot(panel::partner_cursor()) else { return };
+            crate::feature::item_box::item_in_view(cursor)
+                .is_some_and(|item| item.id == SLOT_TWO_FILLER)
+        }
+    };
+
+    if !on_tail {
+        return;
+    }
+
+    log_info!("The selection was left on the tail of a two-slot item; pulled onto its head.");
+
+    // Safety: the screen is up, or the scroll would not have been allowed.
+    unsafe {
+        match target {
+            Target::Bags => panel::pull_cursor_left(),
+            Target::Box => panel::pull_partner_cursor_left(),
+        }
     }
 }
 
@@ -268,8 +353,7 @@ fn try_edge_scroll(cursor: Option<i32>) {
     // arrive under it. Following the old item upward was tried first, and it
     // reads exactly backwards: the player pressed down to reach the new items,
     // not to keep holding the old one.
-    panel::request_redraw();
-    report();
+    after_scroll(target);
 }
 
 /// Whether "down" is being asked for, by keyboard or controller.
@@ -305,18 +389,8 @@ fn pressed(key: i32) -> bool {
 fn dispatch_command(key: i32, ini: &Path, debug_keys: bool) {
     match key {
         VK_HOME => toggle_box(),
-        VK_PAGE_UP => {
-            if scroll_focused(-SCROLL_STEP) {
-                panel::request_redraw();
-            }
-            report();
-        }
-        VK_PAGE_DOWN => {
-            if scroll_focused(SCROLL_STEP) {
-                panel::request_redraw();
-            }
-            report();
-        }
+        VK_PAGE_UP => scroll_focused(-SCROLL_STEP),
+        VK_PAGE_DOWN => scroll_focused(SCROLL_STEP),
 
         // Everything below is diagnostic and stays behind the config switch.
         _ if !debug_keys => {}
@@ -366,12 +440,15 @@ fn report() {
     );
 }
 
-/// Scrolls whatever the selection is over, if a scroll is allowed now.
-///
-/// Returns whether anything moved, so the caller can tell "already at the
-/// end" from "nothing to scroll".
-fn scroll_focused(rows: i32) -> bool {
-    scroll_target().is_some_and(|target| scroll_by(target, rows))
+/// Scrolls whatever the selection is over by `rows`, if a scroll is allowed.
+fn scroll_focused(rows: i32) {
+    let Some(target) = scroll_target() else { return };
+
+    if scroll_by(target, rows) {
+        after_scroll(target);
+    } else {
+        report();
+    }
 }
 
 /// Scrolls down a row, starting over from the top at the end of the list.
@@ -383,15 +460,13 @@ fn scroll_or_wrap() {
     let Some(target) = scroll_target() else { return };
 
     if scroll_by(target, SCROLL_STEP) {
-        panel::request_redraw();
-        report();
+        after_scroll(target);
         return;
     }
 
     if rewind(target) {
         log_info!("Wrapped back to the first slot.");
-        panel::request_redraw();
-        report();
+        after_scroll(target);
     }
 }
 

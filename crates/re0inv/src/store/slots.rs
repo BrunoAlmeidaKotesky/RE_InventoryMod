@@ -74,20 +74,11 @@ impl Slots {
 
     /// Copies `count` slots starting at `start`, padding with empties if the
     /// range runs past the end.
+    #[cfg(test)]
     pub fn view(&self, start: usize, count: usize) -> Vec<Item> {
         (start..start + count)
             .map(|i| self.items.get(i).copied().unwrap_or(Item::EMPTY))
             .collect()
-    }
-
-    /// Writes `items` back into the slots starting at `start`. Anything past
-    /// the end is dropped.
-    pub fn write_back(&mut self, start: usize, items: &[Item]) {
-        for (offset, item) in items.iter().enumerate() {
-            if let Some(slot) = self.items.get_mut(start + offset) {
-                *slot = *item;
-            }
-        }
     }
 
     /// Index of the first empty slot, or `None` when full.

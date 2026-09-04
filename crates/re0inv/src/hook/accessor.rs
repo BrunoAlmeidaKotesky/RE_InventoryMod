@@ -318,6 +318,12 @@ fn played_id() -> Option<i32> {
     Some(unsafe { thiscall0(addresses.character_id, character) } as i32)
 }
 
+/// The bag offset of the character being played, for code that has to know
+/// which of the two stores the screen's own selection is over.
+pub fn played_offset() -> Option<usize> {
+    offset_for_id(played_id()?)
+}
+
 /// Whether this call is the inventory screen asking.
 ///
 /// Most of the screen lives in one stretch: its state machine at `0x005E1D10`,
