@@ -181,20 +181,25 @@ pub const PHASE_PARTNER_HALF: i32 = 7;
 /// has already chosen.
 pub const PHASE_BROWSING: i32 = 2;
 
-/// The action submenu: Use, Combine, Examine, Leave. Phase 0xB in the table.
-pub const PHASE_ACTIONS: i32 = 0xB;
-
 /// The slot confirmed for the action submenu, `menu+0x2B8`. Copied from the
 /// cursor at `0x005E382B`, read by every action in place of the live cursor.
 const OFFSET_SAVED_SLOT: usize = 0x2B8;
 
-/// The submenu's sub-state, `menu+0x290`. Six means a second item is being
-/// chosen: Combine sets it at `0x005E2E49` (with `+0x2AC = 1`), the exchange
-/// action at `0x005E2EB3` (with `+0x2AC = 2`). Both read the saved slot
-/// above when the second item is confirmed, wherever the selection went in
-/// between.
-const OFFSET_SUB_STATE: usize = 0x290;
-pub const SUB_STATE_SECOND_ITEM: i32 = 6;
+/// A pending transition, `menu+0x290`: set by an action for the update's
+/// tail to carry out and cleared there. Six is "rebuild the panels", written
+/// by Combine (`0x005E2E49`), by the exchange action (`0x005E2EB3`) and by
+/// closing (`0x005E3662`) alike. It lasts one frame, which is how it was
+/// mistaken for a state once.
+const OFFSET_TRANSITION: usize = 0x290;
+
+/// What the action submenu is doing, `menu+0x2AC`. Three at rest: set when
+/// the menu is built (`0x005E178F`) and when it closes (`0x005E3658`). One
+/// while Combine waits for its second item (`0x005E2E3F`), two while the
+/// exchange action does (`0x005E2EA9`). Both read the saved slot above when
+/// the second item is confirmed, wherever the selection went in between.
+const OFFSET_MODE: usize = 0x2AC;
+pub const MODE_COMBINE: i32 = 1;
+pub const MODE_EXCHANGE: i32 = 2;
 
 /// Set with the cursor when the game pulls it left onto the head of a
 /// two-slot item (`0x005E206C`): the column the player actually wanted, which
@@ -372,10 +377,63 @@ pub fn saved_slot() -> Option<i32> {
     crate::debug::memory::read_i32(menu + OFFSET_SAVED_SLOT)
 }
 
-/// The submenu's sub-state; see `SUB_STATE_SECOND_ITEM`.
-pub fn sub_state() -> Option<i32> {
+/// What the action submenu is doing; see `MODE_COMBINE`.
+pub fn mode() -> Option<i32> {
     let menu = menu()?;
-    crate::debug::memory::read_i32(menu + OFFSET_SUB_STATE)
+    crate::debug::memory::read_i32(menu + OFFSET_MODE)
+}
+
+/// The menu fields the mod reasons about, for watching them change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Snapshot {
+    pub phase: i32,
+    pub transition: i32,
+    pub mode: i32,
+    pub action: i32,
+    pub cursor: i32,
+    pub saved_slot: i32,
+    pub partner_cursor: i32,
+    /// `+0x2C4`, `+0x2C5`, `+0x2C8`: the column preference, its saved copy,
+    /// and whether the selection is on the personal item.
+    pub flags: [u8; 3],
+}
+
+pub fn snapshot() -> Option<Snapshot> {
+    let menu = menu()?;
+    let read = |offset: usize| crate::debug::memory::read_i32(menu + offset);
+    let byte = |offset: usize| crate::debug::memory::read_array::<1>(menu + offset).map(|b| b[0]);
+
+    Some(Snapshot {
+        phase: read(OFFSET_PHASE)?,
+        transition: read(OFFSET_TRANSITION)?,
+        mode: read(OFFSET_MODE)?,
+        action: read(0x2B0)?,
+        cursor: read(OFFSET_CURSOR)?,
+        saved_slot: read(OFFSET_SAVED_SLOT)?,
+        partner_cursor: read(OFFSET_PARTNER_CURSOR)?,
+        flags: [
+            byte(OFFSET_COLUMN_PREFERENCE)?,
+            byte(OFFSET_COLUMN_PREFERENCE + 1)?,
+            byte(0x2C8)?,
+        ],
+    })
+}
+
+/// Writes the slot the action submenu will work on, in place of the game's
+/// own `mov [edi+0x2B8], eax`. When the selection was pulled off a tail, the
+/// cursor itself moves onto the head and the column is remembered, exactly
+/// as the game's up-move does at `0x005E2066`.
+///
+/// # Safety
+/// `menu` must be the live menu object; the caller is the game's own confirm
+/// path, on the game's thread.
+pub unsafe fn save_confirmed_slot(menu: usize, slot: i32, pulled: bool) {
+    ((menu + OFFSET_SAVED_SLOT) as *mut i32).write_volatile(slot);
+
+    if pulled {
+        ((menu + OFFSET_CURSOR) as *mut i32).write_volatile(slot);
+        ((menu + OFFSET_COLUMN_PREFERENCE) as *mut u8).write_volatile(1);
+    }
 }
 
 /// Moves the played half's selection one slot left, onto the head of a

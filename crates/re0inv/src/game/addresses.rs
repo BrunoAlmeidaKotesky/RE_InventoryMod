@@ -41,6 +41,11 @@ pub struct Addresses {
     /// `0x004DB086`), each followed by `cmp eax, 2`. Only these may have the
     /// store packed to make the pair fit.
     pub two_slot_count_empty_callers: [usize; 2],
+    /// `mov [edi+0x2B8], eax` in the menu state machine: confirming an item
+    /// saves the cursor for the action submenu. Six bytes, replaced whole.
+    pub menu_confirm_save: usize,
+    /// The instruction after it.
+    pub menu_confirm_continue: usize,
     /// `int __thiscall(Bag*, int id)` - slot holding an item, or -1.
     ///
     /// Every question the game asks about what the player is carrying comes
@@ -182,6 +187,8 @@ const JAN_2025: Addresses = Addresses {
     two_slot_first_empty_callers: [0x004D_B56D, 0x004D_B097],
     single_first_empty_caller: 0x004D_B0C1,
     two_slot_count_empty_callers: [0x004D_B561, 0x004D_B08B],
+    menu_confirm_save: 0x005E_382B,
+    menu_confirm_continue: 0x005E_3831,
     bag_find_item: 0x004D_B130,
     bag_find_item_continue: 0x004D_B135,
 

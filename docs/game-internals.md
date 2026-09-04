@@ -692,8 +692,8 @@ the printable strings on it. It is how the assertion above was found.
 Confirming an item in phase 2 (`0x005E3825`) copies `+0x2B4` into `+0x2B8` and
 enters phase 0xB. The submenu's actions work from that copy: the combine code
 at `0x005D97A0` writes counts through `0x004DB8E0` at both `+0x2B4` and
-`+0x2B8`, and choosing Combine sets `+0x2AC = 1`, `+0x290 = 6` and keeps
-picking the second item inside phase 0xB. The description switch at `0x5E582C`
+`+0x2B8`, and choosing Combine sets `+0x2AC = 1` and asks for a panel
+rebuild (`+0x290 = 6`) before picking the second item. The description switch at `0x5E582C`
 (indexed by phase minus two) reads the live cursor in phase 2 and the saved
 slot everywhere else.
 
@@ -701,10 +701,13 @@ Both indices are visible slots, 0 to 5. That is the rule for the mod's
 scrolling: the window under the played half slides freely in phase 2 only. In
 any later phase the game already holds a slot number, and sliding the window
 under it hands Use, Combine and Examine a different item than the one on
-screen. While a second item is being chosen (`+0x290 = 6`), the mod holds the
-row of the saved slot in place and scrolls the other two rows over the rest
-of the store, so the saved slot keeps naming the first item wherever the
-second one is.
+screen. While a second item is being chosen (`+0x2AC` is 1 for Combine, 2
+for the exchange action, 3 at rest), the mod holds the row of the saved slot
+in place and scrolls the other two rows over the rest of the store, so the
+saved slot keeps naming the first item wherever the second one is. `+0x290`
+is not a state: it is a pending transition the update's tail carries out and
+clears within the frame (6 = rebuild the panels, written by Combine, by the
+exchange action and by closing alike).
 
 One more consequence of sliding items under a still selection: the game never
 lets the selection rest on the tail of a two-slot item (its moves pull it onto
@@ -748,3 +751,15 @@ answers every other caller about the six slots in view.
 `add_item`'s two-slot path, return addresses `0x004DB561` and `0x004DB08B`.
 Its two menu callers, `0x005E41F7` and `0x005E4204`, are the exchange size
 checks and never change the store.
+
+### Resting on a tail
+
+The up-move checks the left neighbour of a right-column slot and pulls the
+selection onto the head of a two-slot item (`0x005E2019`-`0x005E206C`, noting
+the column in `+0x2C4`); the right-move steps over the whole item. The
+down-move does neither (`0x005E20D6`-`0x005E2153`): from the right column it
+lands on whatever is below, tail included. Confirming there saves the tail's
+slot, and Examine builds its viewer for the filler, id 180, whose keyframe
+lookup at `0x005F5A90` finds no range and asserts at `0x005F5ABE`. The mod
+replaces the save at `0x005E382B` so the head is saved and the selection is
+pulled onto it, the way the up-move would have.

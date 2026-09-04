@@ -94,6 +94,7 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
     let mut menu_was_open = false;
     // The bag offset whose row is being held, while one is.
     let mut held_row: Option<usize> = None;
+    let mut last_fields: Option<panel::Snapshot> = None;
 
     loop {
         crate::debug::hang::beat();
@@ -144,11 +145,25 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
         }
         menu_was_open = menu_open;
 
+        // The fields the mod reasons about, whenever one of them changes.
+        // This is how the phases and modes above were pinned down, and how a
+        // wrong reading shows up in one run instead of a round of guessing.
+        let fields = if menu_open { panel::snapshot() } else { None };
+        if fields != last_fields {
+            if let Some(fields) = fields {
+                log_debug!("Menu {fields:?}");
+            }
+            last_fields = fields;
+        }
+
         // While a second item is being chosen, the first one's row is held
         // still, so the slot the game saved keeps naming it however far the
         // rest of the store scrolls. Released the moment the choice is over.
-        let choosing_second =
-            menu_open && panel::sub_state() == Some(panel::SUB_STATE_SECOND_ITEM);
+        let choosing_second = menu_open
+            && matches!(
+                panel::mode(),
+                Some(panel::MODE_COMBINE) | Some(panel::MODE_EXCHANGE)
+            );
         if choosing_second && held_row.is_none() {
             held_row = hold_first_item();
         } else if !choosing_second {
@@ -227,11 +242,12 @@ enum Target {
 /// exposure warrants today.
 fn scroll_target() -> Option<Target> {
     match panel::phase()? {
-        panel::PHASE_BROWSING => Some(Target::Bags),
-        // Choosing the second item of a Combine: allowed once the first
-        // item's row is held still, which is what keeps the saved slot true.
-        panel::PHASE_ACTIONS if ROW_HELD.load(Ordering::Relaxed) => Some(Target::Bags),
         panel::PHASE_PARTNER_HALF if crate::feature::item_box::is_open() => Some(Target::Box),
+        panel::PHASE_BROWSING => Some(Target::Bags),
+        // Choosing the second item of a Combine or an exchange, in whatever
+        // phase the game does that: allowed once the first item's row is held
+        // still, which is what keeps the saved slot true.
+        _ if ROW_HELD.load(Ordering::Relaxed) => Some(Target::Bags),
         _ => None,
     }
 }

@@ -5,6 +5,7 @@
 
 pub mod accessor;
 pub mod bag;
+pub mod confirm;
 pub mod detour;
 pub mod panel;
 pub mod patch;
@@ -27,12 +28,15 @@ static INSTALLED: Mutex<Option<Hooks>> = Mutex::new(None);
 #[derive(Default)]
 pub struct Hooks {
     detours: Vec<Detour>,
+    /// Mid-function patches, reverted in reverse order after the detours.
+    patches: Vec<crate::hook::patch::Patch>,
 }
 
 impl Hooks {
     pub const fn new() -> Hooks {
         Hooks {
             detours: Vec::new(),
+            patches: Vec::new(),
         }
     }
 
@@ -64,7 +68,7 @@ impl Hooks {
     }
 
     pub fn len(&self) -> usize {
-        self.detours.len()
+        self.detours.len() + self.patches.len()
     }
 
     /// Restores every patched byte.
@@ -78,8 +82,13 @@ impl Hooks {
             }
         }
 
-        log_info!("Removed {} hook(s).", self.detours.len());
+        for patch in self.patches.iter().rev() {
+            patch.revert();
+        }
+
+        log_info!("Removed {} hook(s).", self.len());
         self.detours.clear();
+        self.patches.clear();
     }
 }
 
@@ -167,6 +176,16 @@ pub unsafe fn install_all(addresses: &Addresses) -> Hooks {
         addresses.bag_find_item,
         search::find_item_stub as unsafe extern "C" fn() as usize,
         &FIND_ITEM_PROLOGUE,
+    );
+
+    // Confirming an item: the saved slot must be a head, never a filler.
+    confirm::set_continue(addresses.menu_confirm_continue);
+    detour::jump_over(
+        &mut hooks.patches,
+        "the confirmed-slot save",
+        addresses.menu_confirm_save,
+        &confirm::SAVE_SLOT,
+        confirm::confirm_stub as unsafe extern "C" fn() as usize,
     );
 
     log_info!("{} hook(s) installed.", hooks.len());
