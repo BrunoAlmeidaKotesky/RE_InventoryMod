@@ -76,10 +76,32 @@ impl Entry {
     /// Refreshes the view from the store, after taking in whatever the game
     /// wrote into it since last time.
     fn sync(&mut self) {
+        self.sync_with(|_| {});
+    }
+
+    /// `sync`, with a change to the window between taking in and publishing.
+    fn sync_with(&mut self, adjust: impl FnOnce(&mut Window)) {
         let mut bag = self.read_view();
         self.window.read_from(&bag);
+        adjust(&mut self.window);
         self.window.write_into(&mut bag);
         self.write_view(&bag);
+    }
+
+    /// Out in the world the game reads the equipped index off this bag and
+    /// holsters what it cannot see. The screen is the only place the window
+    /// may rest away from the equipped item; everywhere else it comes back.
+    fn sync_for_the_world(&mut self) {
+        let mut moved = false;
+        self.sync_with(|window| moved = window.keep_equipped_visible());
+
+        if moved {
+            log_info!(
+                "Bag +0x{:02X}: window back on the equipped item, slot {}.",
+                self.offset,
+                self.window.position() + 1
+            );
+        }
     }
 
     /// Starts the store over from a bag the game filled in behind our back.
@@ -247,7 +269,11 @@ pub unsafe fn view_for(owner: usize, offset: usize) -> *mut Bag {
     // it only after a reseed missed the main-menu path entirely.
     apply_staged(entry, &own);
 
-    entry.sync();
+    if crate::hook::panel::is_open() {
+        entry.sync();
+    } else {
+        entry.sync_for_the_world();
+    }
 
     // Keep the game's own bag showing what the view shows. Code that reaches it
     // without an accessor then sees the visible slots rather than a stale copy,
@@ -364,6 +390,15 @@ pub fn item_in_view(offset: usize, slot: usize) -> Option<Item> {
     let entry = registry.entries.iter().find(|e| e.offset == offset)?;
     let index = entry.window.store_index(slot)?;
     entry.window.store().get(index)
+}
+
+/// Brings every store's window back onto its equipped item, if it left it.
+pub fn keep_equipped_visible_all() {
+    if let Ok(mut registry) = REGISTRY.lock() {
+        for entry in registry.entries.iter_mut() {
+            entry.sync_for_the_world();
+        }
+    }
 }
 
 /// Where each store's window sits, and what it is showing, for logging.

@@ -181,9 +181,18 @@ pub const PHASE_PARTNER_HALF: i32 = 7;
 /// has already chosen.
 pub const PHASE_BROWSING: i32 = 2;
 
-/// The slot confirmed for the action submenu, `menu+0x2B8`. Copied from the
-/// cursor at `0x005E382B`, read by every action in place of the live cursor.
-const OFFSET_SAVED_SLOT: usize = 0x2B8;
+/// The second cursor, `menu+0x2B8`.
+///
+/// Confirming an item copies the cursor here (`0x005E382B`) and opens the
+/// action submenu (phases 5 then 6). Choosing Combine enters phase 11, and
+/// there this is the cursor that moves while `+0x2B4` stays on the first
+/// item. Watched in a live session: in phase 11 this field stepped 2, 4, 2,
+/// 4 and 3, 0, 3, 5, 4, 2 while `+0x2B4` did not change. Its column flag is
+/// `+0x2C5`, seeded from `+0x2C4` at the same moment.
+const OFFSET_SECOND_CURSOR: usize = 0x2B8;
+
+/// The menu phase while the second item of a Combine is being chosen.
+pub const PHASE_SECOND_ITEM: i32 = 11;
 
 /// A pending transition, `menu+0x290`: set by an action for the update's
 /// tail to carry out and cleared there. Six is "rebuild the panels", written
@@ -192,14 +201,10 @@ const OFFSET_SAVED_SLOT: usize = 0x2B8;
 /// mistaken for a state once.
 const OFFSET_TRANSITION: usize = 0x290;
 
-/// What the action submenu is doing, `menu+0x2AC`. Three at rest: set when
-/// the menu is built (`0x005E178F`) and when it closes (`0x005E3658`). One
-/// while Combine waits for its second item (`0x005E2E3F`), two while the
-/// exchange action does (`0x005E2EA9`). Both read the saved slot above when
-/// the second item is confirmed, wherever the selection went in between.
+/// `menu+0x2AC`, written 1, 2 or 3 by the state machine. Read zero in every
+/// sample of a live session, so whatever it means, it is not the mode the
+/// disassembly suggested. Kept in the snapshot only.
 const OFFSET_MODE: usize = 0x2AC;
-pub const MODE_COMBINE: i32 = 1;
-pub const MODE_EXCHANGE: i32 = 2;
 
 /// Set with the cursor when the game pulls it left onto the head of a
 /// two-slot item (`0x005E206C`): the column the player actually wanted, which
@@ -371,16 +376,10 @@ pub fn is_open() -> bool {
     phase().is_some_and(|phase| phase != PHASE_CLOSED)
 }
 
-/// The slot the action submenu is working on.
-pub fn saved_slot() -> Option<i32> {
+/// The second cursor; see `OFFSET_SECOND_CURSOR`.
+pub fn second_cursor() -> Option<i32> {
     let menu = menu()?;
-    crate::debug::memory::read_i32(menu + OFFSET_SAVED_SLOT)
-}
-
-/// What the action submenu is doing; see `MODE_COMBINE`.
-pub fn mode() -> Option<i32> {
-    let menu = menu()?;
-    crate::debug::memory::read_i32(menu + OFFSET_MODE)
+    crate::debug::memory::read_i32(menu + OFFSET_SECOND_CURSOR)
 }
 
 /// The menu fields the mod reasons about, for watching them change.
@@ -391,7 +390,7 @@ pub struct Snapshot {
     pub mode: i32,
     pub action: i32,
     pub cursor: i32,
-    pub saved_slot: i32,
+    pub second_cursor: i32,
     pub partner_cursor: i32,
     /// `+0x2C4`, `+0x2C5`, `+0x2C8`: the column preference, its saved copy,
     /// and whether the selection is on the personal item.
@@ -409,7 +408,7 @@ pub fn snapshot() -> Option<Snapshot> {
         mode: read(OFFSET_MODE)?,
         action: read(0x2B0)?,
         cursor: read(OFFSET_CURSOR)?,
-        saved_slot: read(OFFSET_SAVED_SLOT)?,
+        second_cursor: read(OFFSET_SECOND_CURSOR)?,
         partner_cursor: read(OFFSET_PARTNER_CURSOR)?,
         flags: [
             byte(OFFSET_COLUMN_PREFERENCE)?,
@@ -428,7 +427,7 @@ pub fn snapshot() -> Option<Snapshot> {
 /// `menu` must be the live menu object; the caller is the game's own confirm
 /// path, on the game's thread.
 pub unsafe fn save_confirmed_slot(menu: usize, slot: i32, pulled: bool) {
-    ((menu + OFFSET_SAVED_SLOT) as *mut i32).write_volatile(slot);
+    ((menu + OFFSET_SECOND_CURSOR) as *mut i32).write_volatile(slot);
 
     if pulled {
         ((menu + OFFSET_CURSOR) as *mut i32).write_volatile(slot);
@@ -459,6 +458,23 @@ pub unsafe fn pull_cursor_left() {
 
     cursor.write_volatile(value - 1);
     ((menu + OFFSET_COLUMN_PREFERENCE) as *mut u8).write_volatile(1);
+}
+
+/// The same for the second cursor, with its own column flag at `+0x2C5`.
+///
+/// # Safety
+/// As `pull_cursor_left`.
+pub unsafe fn pull_second_cursor_left() {
+    let Some(menu) = menu() else { return };
+
+    let cursor = (menu + OFFSET_SECOND_CURSOR) as *mut i32;
+    let value = cursor.read_volatile();
+    if value <= 0 {
+        return;
+    }
+
+    cursor.write_volatile(value - 1);
+    ((menu + OFFSET_COLUMN_PREFERENCE + 1) as *mut u8).write_volatile(1);
 }
 
 /// The same for the partner half's selection.

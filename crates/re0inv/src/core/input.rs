@@ -142,6 +142,9 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
         let menu_open = panel::is_open();
         if menu_was_open && !menu_open {
             crate::feature::item_box::close_with_menu();
+            // The game is about to read the equipped index off the bags; a
+            // weapon scrolled out of view would read as holstered.
+            registry::keep_equipped_visible_all();
         }
         menu_was_open = menu_open;
 
@@ -159,11 +162,7 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
         // While a second item is being chosen, the first one's row is held
         // still, so the slot the game saved keeps naming it however far the
         // rest of the store scrolls. Released the moment the choice is over.
-        let choosing_second = menu_open
-            && matches!(
-                panel::mode(),
-                Some(panel::MODE_COMBINE) | Some(panel::MODE_EXCHANGE)
-            );
+        let choosing_second = menu_open && panel::phase() == Some(panel::PHASE_SECOND_ITEM);
         if choosing_second && held_row.is_none() {
             held_row = hold_first_item();
         } else if !choosing_second {
@@ -244,10 +243,9 @@ fn scroll_target() -> Option<Target> {
     match panel::phase()? {
         panel::PHASE_PARTNER_HALF if crate::feature::item_box::is_open() => Some(Target::Box),
         panel::PHASE_BROWSING => Some(Target::Bags),
-        // Choosing the second item of a Combine or an exchange, in whatever
-        // phase the game does that: allowed once the first item's row is held
-        // still, which is what keeps the saved slot true.
-        _ if ROW_HELD.load(Ordering::Relaxed) => Some(Target::Bags),
+        // Choosing the second item of a Combine: allowed once the first
+        // item's row is held still, which is what keeps `+0x2B4` true.
+        panel::PHASE_SECOND_ITEM if ROW_HELD.load(Ordering::Relaxed) => Some(Target::Bags),
         _ => None,
     }
 }
@@ -255,18 +253,28 @@ fn scroll_target() -> Option<Target> {
 /// Whether a row of the played bag is currently held still.
 static ROW_HELD: AtomicBool = AtomicBool::new(false);
 
-/// Holds the confirmed item's row; returns the bag offset it was held in.
+/// The cursor that moves over the played half right now: the second one
+/// while a second item is being chosen, the first otherwise.
+fn played_cursor() -> Option<i32> {
+    if panel::phase() == Some(panel::PHASE_SECOND_ITEM) {
+        panel::second_cursor()
+    } else {
+        panel::cursor()
+    }
+}
+
+/// Holds the first item's row; returns the bag offset it was held in.
 fn hold_first_item() -> Option<usize> {
     let offset = crate::hook::accessor::played_offset()?;
-    let saved = usize::try_from(panel::saved_slot()?).ok()?;
+    let first = usize::try_from(panel::cursor()?).ok()?;
 
-    if !registry::pin_row(offset, saved / 2) {
+    if !registry::pin_row(offset, first / 2) {
         return None;
     }
 
     log_info!(
         "Choosing a second item: row {} stays put while the rest of the bag scrolls.",
-        saved / 2 + 1
+        first / 2 + 1
     );
     Some(offset)
 }
@@ -288,10 +296,12 @@ fn after_scroll(target: Target) {
 fn settle_cursor(target: Target) {
     let slot = |cursor: Option<i32>| cursor.and_then(|c| usize::try_from(c).ok());
 
+    let second = panel::phase() == Some(panel::PHASE_SECOND_ITEM);
+
     let on_tail = match target {
         Target::Bags => {
             let Some(offset) = crate::hook::accessor::played_offset() else { return };
-            let Some(cursor) = slot(panel::cursor()) else { return };
+            let Some(cursor) = slot(played_cursor()) else { return };
             registry::item_in_view(offset, cursor).is_some_and(|item| item.id == SLOT_TWO_FILLER)
         }
         Target::Box => {
@@ -310,6 +320,7 @@ fn settle_cursor(target: Target) {
     // Safety: the screen is up, or the scroll would not have been allowed.
     unsafe {
         match target {
+            Target::Bags if second => panel::pull_second_cursor_left(),
             Target::Bags => panel::pull_cursor_left(),
             Target::Box => panel::pull_partner_cursor_left(),
         }
@@ -347,6 +358,9 @@ fn try_edge_scroll(cursor: Option<i32>) {
 
     let cursor = match target {
         Target::Box => panel::partner_cursor(),
+        Target::Bags if panel::phase() == Some(panel::PHASE_SECOND_ITEM) => {
+            panel::second_cursor()
+        }
         Target::Bags => cursor,
     };
 

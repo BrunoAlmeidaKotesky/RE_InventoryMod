@@ -259,6 +259,25 @@ impl Window {
             .count()
     }
 
+    /// Brings the equipped item back into view if the window left it.
+    ///
+    /// Returns whether the window moved. The game reads the equipped index
+    /// off the six slots it can see, and an item outside them reads as
+    /// nothing equipped: fine while the screen is up and the player is
+    /// browsing, and a holstered weapon the moment it is not.
+    pub fn keep_equipped_visible(&mut self) -> bool {
+        let Some(index) = self.equipped else {
+            return false;
+        };
+
+        if self.visible_slot(index).is_some() {
+            return false;
+        }
+
+        self.reveal(index);
+        true
+    }
+
     /// Packs the store towards the front, keeping the equipped item equipped.
     ///
     /// The game's own `organize` does this to the six slots it can see after
@@ -861,5 +880,20 @@ mod tests {
         window.reveal(11);
         assert_eq!(window.visible_slot(11), Some(5));
         assert_eq!(window.first_visible_empty(), Some(5));
+    }
+
+    #[test]
+    fn the_equipped_item_is_brought_back_into_view() {
+        let mut window = filled_window(12);
+        let mut bag = empty_bag();
+        bag.equipped_index = 1;
+        window.read_from(&bag);
+
+        window.scroll_rows(3);
+        assert_eq!(window.visible_slot(1), None);
+
+        assert!(window.keep_equipped_visible());
+        assert!(window.visible_slot(1).is_some());
+        assert!(!window.keep_equipped_visible());
     }
 }

@@ -684,30 +684,33 @@ the printable strings on it. It is how the assertion above was found.
 | 1 | `0x005E1ECF` | opening |
 | 2 | `0x005E1F01` | **browsing the played half**: `0x005E1FE5`-`0x005E2313` steps `+0x2B4` |
 | 3 | `0x005E296A` | the header tabs; `+0x2B0` is the tab cursor, 1 to 5 |
-| 6 | `0x005E2FA5` | exchange, played side |
+| 5, 6 | `0x005E2F6C`, `0x005E2FA5` | the action submenu opening, then shown: Use, Combine, Examine, Leave |
 | 7 | `0x005E3B74` | exchange, partner side; `+0x2BC` moves, `+0x2B4` is frozen |
 | 9 | `0x005E4953` | leaving |
-| 0xB | `0x005E4BBA` | the action submenu: Use, Combine, Examine, Leave |
+| 0xB | `0x005E4BBA` | choosing the second item of a Combine: `+0x2B8` moves, `+0x2B4` holds the first item |
 
-Confirming an item in phase 2 (`0x005E3825`) copies `+0x2B4` into `+0x2B8` and
-enters phase 0xB. The submenu's actions work from that copy: the combine code
-at `0x005D97A0` writes counts through `0x004DB8E0` at both `+0x2B4` and
-`+0x2B8`, and choosing Combine sets `+0x2AC = 1` and asks for a panel
-rebuild (`+0x290 = 6`) before picking the second item. The description switch at `0x5E582C`
-(indexed by phase minus two) reads the live cursor in phase 2 and the saved
-slot everywhere else.
+Confirming an item in phase 2 (`0x005E3825`) copies `+0x2B4` into `+0x2B8` as
+the starting point of a second cursor and opens the submenu (phases 5, 6).
+Choosing Combine enters phase 0xB, where `+0x2B8` is what moves and `+0x2B4`
+keeps the first item; the combine code at `0x005D97A0` then writes counts
+through `0x004DB8E0` at both. Watched live: in phase 0xB `+0x2B8` stepped
+2, 4, 2, 4 and 3, 0, 3, 5, 4, 2 while `+0x2B4` stayed put, and `+0x2C5` (the
+second cursor's column flag, seeded from `+0x2C4`) toggled with it. The
+description switch at `0x5E582C` (indexed by phase minus two) reads `+0x2B4`
+in phase 2 and `+0x2B8` in phase 0xB.
 
 Both indices are visible slots, 0 to 5. That is the rule for the mod's
 scrolling: the window under the played half slides freely in phase 2 only. In
 any later phase the game already holds a slot number, and sliding the window
 under it hands Use, Combine and Examine a different item than the one on
-screen. While a second item is being chosen (`+0x2AC` is 1 for Combine, 2
-for the exchange action, 3 at rest), the mod holds the row of the saved slot
-in place and scrolls the other two rows over the rest of the store, so the
-saved slot keeps naming the first item wherever the second one is. `+0x290`
-is not a state: it is a pending transition the update's tail carries out and
-clears within the frame (6 = rebuild the panels, written by Combine, by the
-exchange action and by closing alike).
+screen. While a second item is being chosen (phase 0xB), the mod holds the
+row of `+0x2B4` in place and scrolls the other two rows over the rest of the
+store, so the first item keeps its slot wherever the second cursor goes.
+`+0x290` is not a state: it is a pending transition the update's tail carries
+out and clears within the frame (6 = rebuild the panels, written by Combine,
+by the exchange action and by closing alike). `+0x2AC` read zero in every
+sample of a live session; whatever the state machine writes there, it is not
+the mode the disassembly suggested.
 
 One more consequence of sliding items under a still selection: the game never
 lets the selection rest on the tail of a two-slot item (its moves pull it onto
