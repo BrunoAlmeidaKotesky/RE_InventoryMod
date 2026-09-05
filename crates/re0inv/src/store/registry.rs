@@ -269,7 +269,7 @@ pub unsafe fn view_for(owner: usize, offset: usize) -> *mut Bag {
     // it only after a reseed missed the main-menu path entirely.
     apply_staged(entry, &own);
 
-    if crate::hook::panel::is_open() {
+    if crate::hook::panel::screen_holds_the_window() {
         entry.sync();
     } else {
         entry.sync_for_the_world();

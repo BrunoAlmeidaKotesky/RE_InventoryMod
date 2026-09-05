@@ -766,3 +766,11 @@ slot, and Examine builds its viewer for the filler, id 180, whose keyframe
 lookup at `0x005F5A90` finds no range and asserts at `0x005F5ABE`. The mod
 replaces the save at `0x005E382B` so the head is saved and the selection is
 pulled onto it, the way the up-move would have.
+
+The second cursor's own moves in phase 0xB have the same shape: the down-move
+at `0x005E4CC9` adds two, refuses at six (`jge 0x005E510E`), reads the item
+through the played-bag accessor and restores the right column from `+0x2C5`;
+the up-move pulls onto a head at `0x005E4C99` and sets `+0x2C5`; the
+right-move wraps at `0x005E4E1F`. The shared tail at `0x005E510E` only
+updates widgets: nothing normalises a selection left on a tail, in either
+phase.

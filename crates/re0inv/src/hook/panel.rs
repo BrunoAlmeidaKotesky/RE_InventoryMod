@@ -376,6 +376,18 @@ pub fn is_open() -> bool {
     phase().is_some_and(|phase| phase != PHASE_CLOSED)
 }
 
+/// Whether the screen is up and the player is working in it: the phases in
+/// which the window may rest away from the equipped item without the game
+/// acting on it. Phases 0, 1 and 9 — closed, opening, leaving — are where the
+/// world is about to read the bag, and unknown phases count as the world.
+///
+/// From the dispatch table and a watched session: 2 browsing, 3 the tabs,
+/// 5 and 6 the action submenu, 7 the partner half, 11 the second item; 4,
+/// 8 and 10 are transitions inside the screen.
+pub fn screen_holds_the_window() -> bool {
+    matches!(phase(), Some(2..=8) | Some(10) | Some(PHASE_SECOND_ITEM))
+}
+
 /// The second cursor; see `OFFSET_SECOND_CURSOR`.
 pub fn second_cursor() -> Option<i32> {
     let menu = menu()?;

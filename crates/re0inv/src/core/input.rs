@@ -95,6 +95,7 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
     // The bag offset whose row is being held, while one is.
     let mut held_row: Option<usize> = None;
     let mut last_fields: Option<panel::Snapshot> = None;
+    let mut last_active: Option<(Target, i32)> = None;
 
     loop {
         crate::debug::hang::beat();
@@ -173,6 +174,19 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
         }
         ROW_HELD.store(held_row.is_some(), Ordering::Relaxed);
 
+        // The game's own down-move lands on the tail of a two-slot item when
+        // it comes down the right column (`0x005E20D6`, `0x005E4CC9`); its
+        // up-move is the only one that pulls onto the head. So whichever
+        // selection is live is checked whenever it moves, not only after a
+        // scroll of ours, and pulled the way the up-move would have.
+        let active = active_selection();
+        if active != last_active {
+            last_active = active;
+            if let Some((target, _)) = active {
+                settle_cursor(target);
+            }
+        }
+
         let down = holding_down(&controller, &mut pad_seen);
 
         if down && !down_was_down {
@@ -210,7 +224,7 @@ pub fn run(ini: PathBuf, debug_keys: bool) {
 }
 
 /// What a scroll would move right now.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Target {
     /// The characters' bags, together.
     Bags,
@@ -252,6 +266,16 @@ fn scroll_target() -> Option<Target> {
 
 /// Whether a row of the played bag is currently held still.
 static ROW_HELD: AtomicBool = AtomicBool::new(false);
+
+/// The selection the player is moving right now, and where it is.
+fn active_selection() -> Option<(Target, i32)> {
+    let target = scroll_target()?;
+    let cursor = match target {
+        Target::Bags => played_cursor()?,
+        Target::Box => panel::partner_cursor()?,
+    };
+    Some((target, cursor))
+}
 
 /// The cursor that moves over the played half right now: the second one
 /// while a second item is being chosen, the first otherwise.
