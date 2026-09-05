@@ -104,6 +104,20 @@ impl Entry {
         }
     }
 
+    /// Publishes a window just rebuilt from the side file.
+    ///
+    /// No read-back: the view still shows whatever position the old window
+    /// had, and copying that into the new one is how a restore once emptied a
+    /// bag. The one thing taken from the game is the equipped slot, which the
+    /// file does not record and the game's bag does.
+    fn publish_after_restore(&mut self, own: &Bag) {
+        self.window.adopt_equipped(own.equipped_index);
+
+        let mut bag = self.read_view();
+        self.window.write_into(&mut bag);
+        self.write_view(&bag);
+    }
+
     /// Starts the store over from a bag the game filled in behind our back.
     fn reseed(&mut self, source: &Bag) {
         self.window = Window::new(self.window.store().capacity());
@@ -219,8 +233,8 @@ pub unsafe fn view_for(owner: usize, offset: usize) -> *mut Bag {
     let own_ptr = (owner + offset) as *mut Bag;
     let own = read(own_ptr);
 
-    let index = match registry.find(owner, offset) {
-        Some(index) => index,
+    let (index, is_new) = match registry.find(owner, offset) {
+        Some(index) => (index, false),
         None => {
             let capacity = registry.capacity;
 
@@ -243,7 +257,7 @@ pub unsafe fn view_for(owner: usize, offset: usize) -> *mut Bag {
                 last_reported: String::new(),
             });
 
-            registry.entries.len() - 1
+            (registry.entries.len() - 1, true)
         }
     };
 
@@ -252,7 +266,8 @@ pub unsafe fn view_for(owner: usize, offset: usize) -> *mut Bag {
     // Someone wrote the game's own bag without going through here. Whatever it
     // put there is newer than anything the store holds, so the store restarts
     // from it rather than overwriting a freshly loaded inventory.
-    if entry.mirror != own {
+    let changed = entry.mirror != own;
+    if changed {
         log_info!(
             "Bag at 0x{:08X}+0x{:02X} changed underneath us; reseeding.",
             owner,
@@ -261,15 +276,17 @@ pub unsafe fn view_for(owner: usize, offset: usize) -> *mut Bag {
         entry.reseed(&own);
     }
 
-    // A staged restore may be waiting whatever path led here: a reseed when a
-    // load overwrote the bag mid-session, a brand-new entry when the save was
-    // loaded straight from the main menu, or no visible change at all when the
-    // loaded six happen to equal what was already showing. It verifies itself
-    // against the game's bag, so offering it every time is safe — and offering
-    // it only after a reseed missed the main-menu path entirely.
-    apply_staged(entry, &own);
-
-    if crate::hook::panel::screen_holds_the_window() {
+    // A staged restore is offered when this bag is new to the registry, when
+    // the game has just written it — the copy of a save landing — and once
+    // regardless, so a load whose six equal what was already showing is not
+    // missed. Never otherwise. Between those moments the game's bag holds
+    // only what this mod last published, so a match means nothing, and an
+    // application then rebuilt the window at the record's position while the
+    // view still showed another: reading that view back put six stale slots
+    // over the record, and a scrolled partner lost everything she carried.
+    if apply_staged(entry, &own, is_new || changed) {
+        entry.publish_after_restore(&own);
+    } else if crate::hook::panel::screen_holds_the_window() {
         entry.sync();
     } else {
         entry.sync_for_the_world();
@@ -437,13 +454,49 @@ pub fn snapshot() -> Vec<(usize, usize, Vec<Item>)> {
             let bag = entry.read_view();
             entry.window.read_from(&bag);
 
-            (
-                entry.offset,
-                entry.window.position(),
-                entry.window.store().as_slice().to_vec(),
-            )
+            // The game is about to write its own bag into the save, and that
+            // is what the record will be matched against on load. So the
+            // position recorded is wherever those six sit in the store, not
+            // where the window happens to be: the two drift apart whenever
+            // the window moved after the last accessor call.
+            //
+            // Safety: the entry's owner is the object the game handed out
+            // this bag from, and it is read exactly as `view_for` reads it.
+            let saved = unsafe { read((entry.owner + entry.offset) as *const Bag) };
+            let items = entry.window.store().as_slice().to_vec();
+            let position = matching_position(&items, entry.window.position(), &saved.items)
+                .unwrap_or(entry.window.position());
+
+            (entry.offset, position, items)
         })
         .collect()
+}
+
+/// Where in `items` the six `saved` slots sit, if anywhere.
+///
+/// The recorded position is tried first. Then every other position the
+/// window could rest at, except that six empty slots only count at the
+/// recorded position: an empty page would otherwise match any empty bag, and
+/// hand one save's items to another.
+pub fn matching_position(items: &[Item], recorded: usize, saved: &[Item]) -> Option<usize> {
+    let six_at = |position: usize| -> Vec<Item> {
+        (0..BAG_SIZE)
+            .map(|slot| items.get(position + slot).copied().unwrap_or(Item::EMPTY))
+            .collect()
+    }
+;
+
+    if six_at(recorded)[..] == saved[..] {
+        return Some(recorded);
+    }
+
+    if saved.iter().all(|item| item.is_empty()) {
+        return None;
+    }
+
+    (0..=items.len().saturating_sub(BAG_SIZE))
+        .step_by(2)
+        .find(|&position| six_at(position)[..] == saved[..])
 }
 
 /// What is waiting to be put back once the game has finished loading.
@@ -473,10 +526,9 @@ const STAGED_LIFETIME: Duration = Duration::from_secs(60);
 
 pub struct Restore {
     pub offset: usize,
+    /// Where the six the game saved sit in `items`, as recorded.
     pub position: usize,
     pub items: Vec<Item>,
-    /// The six the game should have restored, if this belongs to that save.
-    pub expected_visible: Vec<Item>,
 }
 
 /// One staged restore, and what has happened to it so far.
@@ -488,6 +540,9 @@ struct Staged {
     /// copy causes, and the answer to that is applying again, not having
     /// consumed the record.
     applied: bool,
+    /// Offered to a bag at least once. The first offer is unconditional;
+    /// later ones need the game to have written the bag.
+    offered: bool,
 }
 
 /// Holds a restore until the game has loaded.
@@ -501,6 +556,7 @@ pub fn stage(restores: Vec<Restore>) {
                 restore,
                 since: Instant::now(),
                 applied: false,
+                offered: false,
             })
             .collect();
         PENDING_ANY.store(!pending.is_empty(), Ordering::Release);
@@ -527,17 +583,25 @@ pub fn restore_matched() -> bool {
 
 /// Puts a staged store back, if this bag is one that was waiting for it.
 ///
-/// Called from `view_for` on every pass while something is staged. It widens
-/// the store back to everything the side file recorded, but only once the six
-/// slots the game's bag holds agree with the six recorded alongside — that is
-/// what says the game has actually finished copying this save in.
+/// Called from `view_for` while something is staged. It widens the store back
+/// to everything the side file recorded, but only once the six slots the
+/// game's bag holds are found in the record — that is what says the game has
+/// actually finished copying this save in. Returns whether it did.
 ///
-/// Three deliberate choices, each covering a failure that was found by review
-/// rather than in play:
+/// `bag_changed` says the game wrote the bag since the last publish. A record
+/// is offered on its first chance regardless, and after that only when the
+/// bag changed: in between, the bag holds what this mod published, and a
+/// match against that is an echo, not the save arriving.
+///
+/// Deliberate choices, each covering a failure that was found by review or
+/// in play:
 ///
 /// - Every candidate at this offset is tried, not just the first. A file can
 ///   hold two records for `+0x20`, and the stale one must not shadow the live
 ///   one.
+/// - The six are looked for at every position, not only the recorded one.
+///   The recorded position and what the game actually saved once disagreed,
+///   and twelve items sat unreachable in the file for it.
 /// - A restore that matches is applied but kept. The match can happen *before*
 ///   the game copies the save in — the load hook runs early, and six empty
 ///   slots match six empty slots — and the copy then reseeds the store,
@@ -547,14 +611,16 @@ pub fn restore_matched() -> bool {
 ///   other save never matches during the load, but the live inventory drifts,
 ///   and given forever it would eventually coincide — and be overwritten with
 ///   stale items mid-session.
-fn apply_staged(entry: &mut Entry, restored: &Bag) {
+fn apply_staged(entry: &mut Entry, restored: &Bag, bag_changed: bool) -> bool {
     if !PENDING_ANY.load(Ordering::Acquire) {
-        return;
+        return false;
     }
 
     let Ok(mut pending) = PENDING.lock() else {
-        return;
+        return false;
     };
+
+    let mut applied = false;
 
     pending.retain(|staged| {
         let keep = staged.since.elapsed() < STAGED_LIFETIME;
@@ -575,12 +641,19 @@ fn apply_staged(entry: &mut Entry, restored: &Bag) {
         .iter_mut()
         .filter(|staged| staged.restore.offset == entry.offset)
     {
-        if staged.restore.expected_visible[..] != restored.items[..] {
+        if !bag_changed && staged.offered {
             continue;
         }
+        staged.offered = true;
+
+        let restore = &staged.restore;
+        let Some(position) =
+            matching_position(&restore.items, restore.position, &restored.items)
+        else {
+            continue;
+        };
 
         let configured = entry.window.store().capacity();
-        let restore = &staged.restore;
 
         if restore.items.len() > configured {
             log_warn!(
@@ -592,22 +665,25 @@ fn apply_staged(entry: &mut Entry, restored: &Bag) {
             );
         }
 
-        entry.window = Window::with_items(configured, &restore.items, restore.position);
+        entry.window = Window::with_items(configured, &restore.items, position);
 
         if !staged.applied {
             staged.applied = true;
             log_info!(
-                "Bag +0x{:02X} restored to {} slots from the side file.",
+                "Bag +0x{:02X} restored to {} slots from the side file, the saved six at slot {}.",
                 restore.offset,
-                entry.window.store().capacity()
+                entry.window.store().capacity(),
+                position + 1
             );
         }
 
         MATCHED.store(true, Ordering::Relaxed);
+        applied = true;
         break;
     }
 
     PENDING_ANY.store(!pending.is_empty(), Ordering::Release);
+    applied
 }
 
 /// The items a store holds, for logging.
@@ -736,4 +812,53 @@ pub fn rewind_all() -> usize {
     }
 
     moved
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(id: i32) -> Item {
+        Item { id, count: 1 }
+    }
+
+    fn store(ids: &[i32]) -> Vec<Item> {
+        ids.iter()
+            .map(|&id| if id == 0 { Item::EMPTY } else { item(id) })
+            .collect()
+    }
+
+    #[test]
+    fn the_recorded_position_wins_when_it_fits() {
+        let items = store(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+        let saved = store(&[5, 6, 7, 8, 9, 10]);
+
+        assert_eq!(matching_position(&items, 4, &saved), Some(4));
+    }
+
+    /// The file said position 4; the game had saved the first six.
+    #[test]
+    fn the_saved_six_are_found_wherever_they_sit() {
+        let items = store(&[5, 180, 3, 2, 59, 32, 33, 57, 14, 55, 0, 0]);
+        let saved = store(&[5, 180, 3, 2, 59, 32]);
+
+        assert_eq!(matching_position(&items, 4, &saved), Some(0));
+    }
+
+    #[test]
+    fn six_empty_slots_only_match_the_recorded_position() {
+        let items = store(&[1, 2, 3, 4, 5, 6, 0, 0, 0, 0, 0, 0]);
+        let empty = vec![Item::EMPTY; BAG_SIZE];
+
+        assert_eq!(matching_position(&items, 6, &empty), Some(6));
+        assert_eq!(matching_position(&items, 0, &empty), None);
+    }
+
+    #[test]
+    fn a_different_save_matches_nowhere() {
+        let items = store(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+        let saved = store(&[9, 9, 9, 9, 9, 9]);
+
+        assert_eq!(matching_position(&items, 0, &saved), None);
+    }
 }

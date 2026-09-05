@@ -259,6 +259,17 @@ impl Window {
             .count()
     }
 
+    /// Takes the equipped slot the game holds, as a slot of the current view.
+    ///
+    /// For a store just rebuilt from the side file: the file does not record
+    /// what was equipped, the game's bag does, and it is a visible slot.
+    pub fn adopt_equipped(&mut self, slot: i32) {
+        self.equipped = usize::try_from(slot)
+            .ok()
+            .filter(|slot| *slot < BAG_SIZE)
+            .and_then(|slot| self.store_index(slot));
+    }
+
     /// Brings the equipped item back into view if the window left it.
     ///
     /// Returns whether the window moved. The game reads the equipped index

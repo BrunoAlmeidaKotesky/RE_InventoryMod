@@ -79,6 +79,7 @@ impl StoreData {
     ///
     /// Used to tell a side file that belongs to this save from one left over
     /// from a different session.
+    #[cfg(test)]
     pub fn visible(&self, count: usize) -> Vec<Item> {
         (0..count)
             .map(|slot| {

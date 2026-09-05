@@ -42,7 +42,7 @@ use std::time::{Duration, Instant};
 
 use crate::core::logging::{log_info, log_warn};
 use crate::game::addresses::Addresses;
-use crate::game::inventory::{Item, BAG_SIZE};
+use crate::game::inventory::Item;
 use crate::hook::patch::Patch;
 use crate::store::registry::{self, Restore};
 
@@ -329,7 +329,6 @@ extern "C" fn on_load(slot: u32) {
             .stores
             .into_iter()
             .map(|store| Restore {
-                expected_visible: store.visible(BAG_SIZE),
                 offset: store.offset as usize,
                 position: store.position as usize,
                 items: store.items,
