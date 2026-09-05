@@ -324,6 +324,12 @@ pub fn played_offset() -> Option<usize> {
     offset_for_id(played_id()?)
 }
 
+/// The global holding the inventory manager, from the address table.
+pub fn inventory_holder() -> Option<usize> {
+    let holder = addresses()?.inventory_holder;
+    (holder != 0).then_some(holder)
+}
+
 /// Whether this call is the inventory screen asking.
 ///
 /// Most of the screen lives in one stretch: its state machine at `0x005E1D10`,

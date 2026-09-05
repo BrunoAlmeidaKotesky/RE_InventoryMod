@@ -407,6 +407,13 @@ pub struct Snapshot {
     /// `+0x2C4`, `+0x2C5`, `+0x2C8`: the column preference, its saved copy,
     /// and whether the selection is on the personal item.
     pub flags: [u8; 3],
+    /// `+0x289` and `+0x28B`: read by the partner-command panel and by the
+    /// item confirm respectively; the second is the exchange gate.
+    pub gates: [u8; 2],
+    /// `[inventory manager]+0x30`: the mode the screen was opened in. Every
+    /// action of the partner-command panel (phase 3) refuses while it is 3,
+    /// which `0x005D76E0` sets and `prepare_inventory` clears.
+    pub mode_of_screen: Option<i32>,
 }
 
 pub fn snapshot() -> Option<Snapshot> {
@@ -427,7 +434,19 @@ pub fn snapshot() -> Option<Snapshot> {
             byte(OFFSET_COLUMN_PREFERENCE + 1)?,
             byte(0x2C8)?,
         ],
+        gates: [byte(0x289)?, byte(OFFSET_EXCHANGE)?],
+        mode_of_screen: screen_mode(),
     })
+}
+
+/// The inventory manager's mode field; see `Snapshot::mode_of_screen`.
+pub fn screen_mode() -> Option<i32> {
+    let holder = crate::hook::accessor::inventory_holder()?;
+    let manager = crate::debug::memory::read_i32(holder)?;
+    if manager <= 0 {
+        return None;
+    }
+    crate::debug::memory::read_i32(manager as usize + 0x30)
 }
 
 /// Writes the slot the action submenu will work on, in place of the game's
