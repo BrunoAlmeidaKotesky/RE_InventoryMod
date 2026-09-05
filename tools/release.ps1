@@ -30,6 +30,10 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 
+# Ultimate ASI Loader (MIT, ThirteenAG) ships inside every package, so a
+# player copies one zip and is done. Fetched and verified by tools\asi-loader.ps1.
+. (Join-Path $PSScriptRoot 'asi-loader.ps1')
+
 $cargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
 if (Test-Path $cargoBin) { $env:PATH = "$cargoBin;$env:PATH" }
 if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
@@ -80,6 +84,7 @@ $variants = @(
 )
 
 $iniTemplate = Get-Content (Join-Path $repo 're0inv.ini') -Raw
+$loader = Get-AsiLoader
 
 foreach ($variant in $variants) {
     $name = $variant.Name
@@ -94,6 +99,10 @@ foreach ($variant in $variants) {
 
     Copy-Item (Join-Path $repo "target\$Target\release\re0inv.dll") `
         (Join-Path $stage 'scripts\re0inv.asi')
+
+    # The loader, so the zip is the whole install.
+    Copy-Item $loader.Dll (Join-Path $stage 'dinput8.dll')
+    Copy-Item $loader.License (Join-Path $stage 'LICENSE-Ultimate-ASI-Loader.txt')
 
     # The ini preset: the template with this variant's switches applied.
     $ini = $iniTemplate
@@ -111,12 +120,12 @@ $($variant.Blurb)
 For Resident Evil 0 HD Remaster on Steam (build Jan 28 2025).
 
 INSTALL
-1. Copy everything in this zip into the game folder
-   (the one containing re0hd.exe, usually
-   ...\steamapps\common\Resident Evil 0).
-2. You also need Ultimate ASI Loader: download dinput8.dll (Win32 build) from
-   https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases
-   and put it in the same folder. Skip this if you already have it.
+Copy everything in this zip into the game folder (the one containing
+re0hd.exe, usually ...\steamapps\common\Resident Evil 0). That is all.
+
+The zip includes dinput8.dll, the Ultimate ASI Loader by ThirteenAG (MIT),
+which is what loads scripts\re0inv.asi. If another mod already put a
+dinput8.dll there, keep either one: it is the same loader.
 $(if ($variant.Messages) { "
 On the first launch the mod writes the typewriter prompt's text files
 (msg_*_inv.arc) from your own game files. Your original files are never
@@ -140,7 +149,7 @@ one over it replaces it.
 
 UNINSTALL
 Delete scripts\re0inv.asi, re0inv.ini, re0inv.log and re0inv_hang.* from the
-game folder.
+game folder. dinput8.dll can go too, unless another mod uses it.
 re0inv_saves.bin holds the mod's own saved items (extra slots and box) - keep
 it if you plan to reinstall, delete it otherwise.
 $(if ($variant.Messages) { "Also delete nativePC\arc\message\msg_*_inv.arc." })
@@ -154,12 +163,12 @@ $($variant.BlurbPt)
 Para Resident Evil 0 HD Remaster na Steam (build de 28 de janeiro de 2025).
 
 INSTALAR
-1. Copie tudo deste zip para a pasta do jogo
-   (a que contem o re0hd.exe, normalmente
-   ...\steamapps\common\Resident Evil 0).
-2. Voce tambem precisa do Ultimate ASI Loader: baixe o dinput8.dll (build
-   Win32) em https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases
-   e coloque na mesma pasta. Pule se ja tiver.
+Copie tudo deste zip para a pasta do jogo (a que contem o re0hd.exe,
+normalmente ...\steamapps\common\Resident Evil 0). So isso.
+
+O zip inclui o dinput8.dll, o Ultimate ASI Loader do ThirteenAG (MIT), que e
+quem carrega o scripts\re0inv.asi. Se outro mod ja colocou um dinput8.dll
+la, tanto faz qual fica: e o mesmo carregador.
 $(if ($variant.Messages) { "
 Na primeira vez que o jogo abrir, o mod gera os textos da maquina de
 escrever (msg_*_inv.arc) a partir dos seus proprios arquivos. Os originais
@@ -183,7 +192,7 @@ cima substitui.
 
 DESINSTALAR
 Apague scripts\re0inv.asi, re0inv.ini, re0inv.log e re0inv_hang.* da pasta
-do jogo.
+do jogo. O dinput8.dll tambem pode ir, a menos que outro mod use ele.
 re0inv_saves.bin guarda os itens salvos pelo mod (slots extras e bau) -
 mantenha se pretende reinstalar, apague caso contrario.
 $(if ($variant.Messages) { "Apague tambem nativePC\arc\message\msg_*_inv.arc." })

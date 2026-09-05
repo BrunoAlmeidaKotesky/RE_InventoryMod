@@ -34,3 +34,10 @@ reference/
 
 # Release packages, built by tools/release.ps1.
 dist/
+
+# Third-party binaries fetched by tools/release.ps1 (pinned by hash there).
+third_party/
+docs/nexus/
+# Editor and assistant tooling: local to each machine.
+.vscode/
+.claude/

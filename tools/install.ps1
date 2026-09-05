@@ -121,6 +121,20 @@ if ($ItemBox) {
     }
 }
 
+# --- The loader ---
+
+# Ultimate ASI Loader is what loads the .asi. Installed only when the game
+# folder has no dinput8.dll at all, so one left by another mod is respected,
+# and recorded so uninstall removes only what this script put there.
+$loaderPath = Join-Path $GameDir 'dinput8.dll'
+if (-not (Test-Path $loaderPath)) {
+    . (Join-Path $PSScriptRoot 'asi-loader.ps1')
+    $loader = Get-AsiLoader -Repo $repo
+    Copy-Item $loader.Dll $loaderPath
+    $manifest.Created += $loaderPath
+    Write-Host "Installed: $loaderPath (Ultimate ASI Loader $AsiLoaderTag)" -ForegroundColor Green
+}
+
 # --- The mod ---
 
 $asi = Join-Path $scripts 're0inv.asi'
