@@ -122,11 +122,25 @@ On the first launch the mod writes the typewriter prompt's text files
 (msg_*_inv.arc) from your own game files. Your original files are never
 modified, so verifying the game files on Steam reports nothing." })
 
+HOW TO USE
+- Inventory: with the cursor on the bottom row, press down again to scroll.
+  The right stick click and Page Up / Page Down also scroll.
+- Item box: use a typewriter and pick the new choice on its prompt. Move
+  items with Exchange, both ways. Home or a left stick click also opens it
+  near a typewriter.
+- Combine: the first item's row stays on screen while the rest scrolls, so
+  the second item can be on any page.
+
+If the game freezes, wait about fifteen seconds before closing it: the mod
+writes re0inv_hang.dmp and re0inv_hang.txt next to the game. Send those with
+re0inv.log when reporting a problem.
+
 Only one variant of this mod can be installed at a time; installing another
 one over it replaces it.
 
 UNINSTALL
-Delete scripts\re0inv.asi, re0inv.ini and re0inv.log from the game folder.
+Delete scripts\re0inv.asi, re0inv.ini, re0inv.log and re0inv_hang.* from the
+game folder.
 re0inv_saves.bin holds the mod's own saved items (extra slots and box) - keep
 it if you plan to reinstall, delete it otherwise.
 $(if ($variant.Messages) { "Also delete nativePC\arc\message\msg_*_inv.arc." })
@@ -151,11 +165,25 @@ Na primeira vez que o jogo abrir, o mod gera os textos da maquina de
 escrever (msg_*_inv.arc) a partir dos seus proprios arquivos. Os originais
 nunca sao modificados; verificar os arquivos na Steam nao acusa nada." })
 
+COMO USAR
+- Inventario: com o cursor na ultima fileira, aperte para baixo de novo para
+  rolar. Clique do analogico direito e Page Up / Page Down tambem rolam.
+- Bau de itens: use uma maquina de escrever e escolha a opcao nova na
+  mensagem dela. Mova itens com o Exchange, nos dois sentidos. Home ou clique
+  do analogico esquerdo tambem abre perto de uma maquina.
+- Combine: a fileira do primeiro item fica na tela enquanto o resto rola,
+  entao o segundo item pode estar em qualquer pagina.
+
+Se o jogo travar, espere uns quinze segundos antes de fechar: o mod grava
+re0inv_hang.dmp e re0inv_hang.txt ao lado do jogo. Mande esses junto com o
+re0inv.log ao relatar um problema.
+
 So uma variante deste mod pode estar instalada por vez; instalar outra por
 cima substitui.
 
 DESINSTALAR
-Apague scripts\re0inv.asi, re0inv.ini e re0inv.log da pasta do jogo.
+Apague scripts\re0inv.asi, re0inv.ini, re0inv.log e re0inv_hang.* da pasta
+do jogo.
 re0inv_saves.bin guarda os itens salvos pelo mod (slots extras e bau) -
 mantenha se pretende reinstalar, apague caso contrario.
 $(if ($variant.Messages) { "Apague tambem nativePC\arc\message\msg_*_inv.arc." })
