@@ -414,6 +414,10 @@ pub struct Snapshot {
     /// action of the partner-command panel (phase 3) refuses while it is 3,
     /// which `0x005D76E0` sets and `prepare_inventory` clears.
     pub mode_of_screen: Option<i32>,
+    /// `[inventory manager]+0x25`: the "partner within reach" flag the
+    /// partner-half validation tests, and which sends the whole of phase 3
+    /// down another path at `0x005E299E`.
+    pub partner_near: Option<u8>,
 }
 
 pub fn snapshot() -> Option<Snapshot> {
@@ -435,18 +439,18 @@ pub fn snapshot() -> Option<Snapshot> {
             byte(0x2C8)?,
         ],
         gates: [byte(0x289)?, byte(OFFSET_EXCHANGE)?],
-        mode_of_screen: screen_mode(),
+        mode_of_screen: manager().and_then(|m| crate::debug::memory::read_i32(m + 0x30)),
+        partner_near: manager()
+            .and_then(|m| crate::debug::memory::read_array::<1>(m + 0x25))
+            .map(|b| b[0]),
     })
 }
 
-/// The inventory manager's mode field; see `Snapshot::mode_of_screen`.
-pub fn screen_mode() -> Option<i32> {
+/// The inventory manager the script commands and the screen work on.
+fn manager() -> Option<usize> {
     let holder = crate::hook::accessor::inventory_holder()?;
     let manager = crate::debug::memory::read_i32(holder)?;
-    if manager <= 0 {
-        return None;
-    }
-    crate::debug::memory::read_i32(manager as usize + 0x30)
+    usize::try_from(manager).ok().filter(|m| *m != 0)
 }
 
 /// Writes the slot the action submenu will work on, in place of the game's

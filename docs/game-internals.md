@@ -774,3 +774,36 @@ the up-move pulls onto a head at `0x005E4C99` and sets `+0x2C5`; the
 right-move wraps at `0x005E4E1F`. The shared tail at `0x005E510E` only
 updates widgets: nothing normalises a selection left on a tail, in either
 phase.
+
+## The script command table and the screen's mode
+
+The game's event scripts call C++ handlers through a table in `.rdata` at
+`0x00CD5C40`, twelve bytes per entry: handler, argument-format string, name.
+The names are the only symbols this binary carries. The entries that touch
+the inventory:
+
+| Index | Handler | Name | What it does |
+|---|---|---|---|
+| 22 | `0x00568B80` | `Sub_ReadyGet` | prepares the sub-screen to hand an item over; `0x005D75D0` |
+| 23 | `0x00568C20` | `Sub_ReadyGetParam` | the same with parameters |
+| 24 | `0x00568D30` | `Sub_ReadySelect` | prepares it to pick an item for the script: `0x005D76E0`, **mode 3** |
+| 25 | `0x00568DB0` | `Sub_ReadyTemp` | |
+| 26 | `0x00568E30` | `Sub_GetResult` | reads what the player chose |
+| 27 | `0x00568EB0` | `Sub_GetItem` | |
+| 28 | `0x00569090` | `SubCall` | opens the sub-screen normally: `prepare_inventory` (`0x005D7550`), **mode 0** |
+| 30 | `0x005691D0` | `SubItem` | |
+| 63 | `0x0056C3D0` | `PlayerEquip` | |
+
+"Sub" is the sub-screen: the inventory. Its manager, the object at
+`[0x00DCEBD0]`, keeps the mode it was opened in at `+0x30`: 0 normal
+(`0x005D75B7`, also written by the normal pause at `0x00609237`), 1 and 2
+(`0x005D764D`, `0x005D765B`), 3 select-for-script (`0x005D7710`), 5 and 6
+(`0x005D760B`, `0x005D7677`). The screen consults it constantly: in mode 3
+the partner-command panel (phase 3) refuses every move and every confirm
+(`0x005E2AA5`, `0x005E2B1E`, `0x005E2B80`), moving up from the top row
+preselects entry 4 (`0x005E2094`), and Combine's second cursor starts at slot
+0 instead of the first item (`0x005E381F`).
+
+The manager also holds the "partner within reach" flag at `+0x25`, tested by
+the partner-half validation (`0x005E3B9E`) and, at `0x005E299E`, by the whole
+of phase 3, which takes another path when it is set.
