@@ -296,6 +296,11 @@ extern "C" fn on_load(slot: u32) {
         registry::discard_staged();
         discard_staged_box();
 
+        // The menu object of the session being replaced is freed with it. A
+        // redraw against its old address is what closed the game on every
+        // load after a death.
+        crate::hook::panel::forget_menu();
+
         // Everything registered so far belongs to the session being replaced.
         // The owners are heap addresses that may be dead after the load, and a
         // stale entry would be written into the next save as a duplicate. The
@@ -415,6 +420,7 @@ extern "C" fn on_new_game() {
     let _ = std::panic::catch_unwind(|| {
         registry::discard_staged();
         discard_staged_box();
+        crate::hook::panel::forget_menu();
         registry::forget_all();
         crate::feature::item_box::set_contents(Vec::new());
         log_info!("New game: the box and the extra slots start empty.");

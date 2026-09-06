@@ -351,10 +351,38 @@ pub unsafe fn restore_partner_half() {
     log_debug!("Exchange state put back to {original}.");
 }
 
+/// Highest phase the state machine dispatches (`cmp eax, 0xB` at `0x005E1E94`).
+const PHASE_LAST: i32 = 0xB;
+
+/// Drops the remembered menu object.
+///
+/// The object is freed and rebuilt when the game reloads — dying and loading
+/// from the title screen is the everyday case — and the draw hook only
+/// records it again once the new one is drawn. In between, the old address
+/// reads as whatever the allocator put there: once it read a phase of
+/// 782761984, `is_open` said yes, and the next redraw request drew a menu
+/// that no longer existed.
+pub fn forget_menu() {
+    if MENU.swap(0, Ordering::Relaxed) != 0 {
+        log_debug!("Menu object forgotten; the next draw records the new one.");
+    }
+}
+
 /// The menu's state counter, for telling an open inventory from a closed one.
+///
+/// A value the state machine could never hold means the object is gone, and
+/// the pointer is dropped on the spot rather than trusted once more.
 pub fn phase() -> Option<i32> {
     let menu = menu()?;
-    crate::debug::memory::read_i32(menu + OFFSET_PHASE)
+    let phase = crate::debug::memory::read_i32(menu + OFFSET_PHASE)?;
+
+    if !(0..=PHASE_LAST).contains(&phase) {
+        log_info!("Menu at 0x{menu:08X} reads phase {phase}; it is gone, forgetting it.");
+        MENU.store(0, Ordering::Relaxed);
+        return None;
+    }
+
+    Some(phase)
 }
 
 /// All four selection candidates at once, for identifying which is which.
