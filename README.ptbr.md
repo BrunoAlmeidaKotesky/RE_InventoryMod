@@ -1,97 +1,128 @@
-# RE0 QoL — Inventário Expandido, Baú de Itens, Portas Instantâneas
+# RE0 QoL
 
-*Read this in [English](README.md).*
+*In English: [README.md](README.md)*
 
-Três mods de qualidade de vida para **Resident Evil 0 HD Remaster** no PC
-(Steam). Copie um zip para a pasta do jogo e jogue. Nada para rodar, nenhum
-arquivo do jogo substituído.
+Três mods pequenos para **Resident Evil 0 HD Remaster** na Steam. Instale
+os três ou só o que você quiser.
 
-- **Inventário expandido** — 12 slots por personagem em vez de 6, rolados
-  dentro do painel do próprio jogo.
-- **Baú de itens** — o baú que o resto da série tem, em toda máquina de
-  escrever.
-- **Portas instantâneas** — sem a animação de porta entre salas.
+- **Inventário expandido**: 12 slots por personagem em vez de 6. O painel
+  continua mostrando 6 de cada vez, você rola para ver o resto.
+- **Baú de itens**: toda máquina de escrever tem um baú, como nos outros
+  jogos da série.
+- **Portas instantâneas**: tira a animação de porta entre as salas.
 
-Itens extras e o baú sobrevivem a salvar e carregar. Ficam num arquivo
-pequeno ao lado do jogo; **o save do jogo nunca é tocado**, então uma falha
-só pode custar o que o mod adicionou.
+Nada na pasta do jogo é substituído. Os slots extras e o baú ficam salvos
+num arquivo separado ao lado do jogo (`re0inv_saves.bin`) e os saves do jogo
+não são tocados. No pior caso, se o mod quebrar, você perde o que estava
+nos slots extras ou no baú, não o seu progresso.
 
-> **Beta.** Testado numa única máquina. Faça backup do save antes
-> (`%ProgramFiles(x86)%\Steam\userdata\<seu id>\339340\remote`).
+Isto é um beta. Só testei na minha máquina. Faça backup dos saves antes de
+experimentar, eles ficam em `...\Steam\userdata\<seu id>\339340\remote`.
 
-## Baixar e instalar
+## Requisitos
 
-Escolha **um** zip na [release mais recente](https://github.com/BrunoAlmeidaKotesky/RE_InventoryMod/releases/latest):
+- Resident Evil 0 HD Remaster na Steam, build atual (28 de janeiro de
+  2025). Em qualquer outra build o mod carrega, escreve uma linha no
+  `re0inv.log` avisando, e não muda nada.
+- Mais nada. O Ultimate ASI Loader (`dinput8.dll`) já vem no zip.
 
-| Pacote | O que vem |
+## Instalar
+
+Baixe um zip da
+[release mais recente](https://github.com/BrunoAlmeidaKotesky/RE_InventoryMod/releases/latest):
+
+| Zip | O que tem dentro |
 |---|---|
-| `RE0-QoL-Bundle` | As três, cada uma chaveável no `re0inv.ini` |
+| `RE0-QoL-Bundle` | Os três. Cada um pode ser desligado no `re0inv.ini`. |
 | `RE0-InventoryExpansion` | Só os 12 slots |
 | `RE0-ItemBox` | Só o baú |
 | `RE0-DoorSkip` | Só as portas instantâneas |
 
-Copie o conteúdo dele para a pasta do jogo, a que tem o `re0hd.exe`
-(normalmente `C:\...\steamapps\common\Resident Evil 0`). Pronto. O zip inclui
-o `dinput8.dll`, o Ultimate ASI Loader que carrega o mod; se outro mod já
-colocou um lá, tanto faz qual fica. O "verificar integridade" da Steam
-continua limpo.
+Extraia na pasta do jogo, a que tem o `re0hd.exe` (normalmente
+`C:\Program Files (x86)\Steam\steamapps\common\Resident Evil 0`). Só isso.
 
-Funciona com a build atual da Steam (28 jan 2025). Em qualquer outra, o mod
-carrega, anota no `re0inv.log`, e não muda nada.
+Se já existir um `dinput8.dll` de outro mod, fique com qualquer um, é o
+mesmo carregador. O "verificar integridade dos arquivos" da Steam não vai
+reclamar, nenhum arquivo original é mexido.
 
-## Como usar
+## Como funciona no jogo
 
-- **Rolar:** na última fileira, aperte para baixo de novo. Clique do
-  analógico direito e Page Up / Page Down também rolam. No fim volta ao
-  começo.
-- **Baú:** use uma máquina de escrever e escolha a opção nova na mensagem
-  dela. Mova itens com o Exchange, nos dois sentidos. Perto de uma máquina,
-  Home ou clique do analógico esquerdo também abre pelo inventário. Fecha
-  junto com o inventário.
-- **Combinar:** a fileira do primeiro item fica na tela enquanto o resto rola,
-  então o segundo item pode estar em qualquer página.
-- **Configurações:** `re0inv.ini` na pasta do jogo, um comentário por linha.
-  `Mod=0` desliga tudo sem desinstalar.
+**Rolar o inventário.** Com o cursor na última fileira, aperte para baixo
+mais uma vez e o painel rola. Clicar o analógico direito, ou Page Up / Page
+Down no teclado, também rola. No fim ele volta pro começo.
 
-## Se algo der errado
+**Baú de itens.** Use uma máquina de escrever e aparece uma opção nova na
+mensagem dela. O baú abre onde normalmente fica o inventário do parceiro, e
+você move as coisas com o Exchange, nos dois sentidos. Se estiver do lado de
+uma máquina com o inventário aberto, Home (ou clicar o analógico esquerdo)
+também abre. Ele fecha junto com o inventário.
 
-O `re0inv.log` na pasta do jogo diz o que o mod fez. Se o jogo travar,
-**espere uns quinze segundos antes de fechar**: o mod grava `re0inv_hang.dmp`
-e `re0inv_hang.txt` ao lado do jogo, e são eles que tornam um travamento
-consertável. Mande junto com o log na
-[página de issues](https://github.com/BrunoAlmeidaKotesky/RE_InventoryMod/issues).
+**Combinar.** A fileira do primeiro item que você escolheu fica na tela
+enquanto o resto rola, então o segundo item pode estar em qualquer página.
+
+**Configurações** ficam no `re0inv.ini`. Cada opção tem um comentário do
+lado. `Mod=0` desliga tudo sem desinstalar.
+
+## Deu problema?
+
+Olhe primeiro o `re0inv.log` na pasta do jogo.
+
+Se o jogo travar, não feche na hora. Dê uns 15 segundos: o mod percebe o
+travamento e grava `re0inv_hang.dmp` e `re0inv_hang.txt` ao lado do jogo.
+Sem eles não tenho como saber onde travou. Abra uma
+[issue](https://github.com/BrunoAlmeidaKotesky/RE_InventoryMod/issues) e
+anexe os dois junto com o log.
 
 ## Desinstalar
 
-Antes, mova o que importa para os seis primeiros slots: os slots extras e o
-baú não estão no save do jogo. Depois apague `scripts\re0inv.asi`,
-`re0inv.ini`, `re0inv.log`, `re0inv_hang.*` e
-`nativePC\arc\message\msg_*_inv.arc`; o `dinput8.dll` também, a menos que
-outro mod use ele. O `re0inv_saves.bin` guarda os itens do mod, mantenha se
-pretende reinstalar.
+Antes de tirar o mod, mova o que você quer guardar para os seis primeiros
+slots. Os slots extras e o baú não fazem parte do save do jogo, então o jogo
+não vai enxergar eles depois que o mod sair.
 
-Não é compatível com o [re0box](https://github.com/descawed/re0box): os dois
-mexem na mesma parte do jogo.
+Depois apague da pasta do jogo:
 
-## Para desenvolvedores
+- `scripts\re0inv.asi`
+- `re0inv.ini`, `re0inv.log`, `re0inv_hang.dmp`, `re0inv_hang.txt`
+- `nativePC\arc\message\msg_*_inv.arc` (o texto da máquina de escrever que
+  o mod gerou)
+- `dinput8.dll`, a menos que outro mod use ele
 
-Rust, compilado para o target GNU de 32 bits (`rustup target add
-i686-pc-windows-gnu`, depois `tools\build.ps1`; `tools\release.ps1` monta os
-quatro pacotes). O que foi descoberto sobre o interior do jogo está em
+O `re0inv_saves.bin` guarda os itens do mod. Mantenha se pretende
+reinstalar.
+
+## Limitações conhecidas
+
+- Não funciona junto com o [re0box](https://github.com/descawed/re0box).
+  Os dois mexem na mesma parte do jogo, escolha um.
+- Só uma variante do zip por vez. Instalar uma segunda por cima substitui a
+  primeira.
+
+## Compilar do código
+
+Rust, target GNU de 32 bits:
+
+```
+rustup target add i686-pc-windows-gnu
+tools\build.ps1
+```
+
+O `tools\release.ps1` gera os quatro zips. As anotações sobre o interior do
+jogo (endereços, estruturas, o que a engenharia reversa achou) estão em
 [docs/](docs/).
 
-## Créditos e questões legais
+## Créditos
 
-O **Ultimate ASI Loader, de ThirteenAG**, vai dentro de todo pacote, sem
-modificação, sob a licença MIT dele (incluída). O **re0box, de descawed**, foi
-a referência técnica para o sistema de inventário do jogo: endereços, layouts,
-comportamento observado, que são fatos sobre o jogo, não autoria. O
-repositório do re0box não tem licença, então todos os direitos são do autor;
-nenhum código dele foi copiado para cá.
+- [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader)
+  do ThirteenAG, vai sem modificação em cada zip sob a licença MIT dele
+  (`LICENSE-Ultimate-ASI-Loader.txt`).
+- [re0box](https://github.com/descawed/re0box) do descawed, o primeiro mod
+  de baú para este jogo. Foi minha referência de como o jogo lida com o
+  inventário. Nenhum código dele é usado aqui; ele não tem licença, então
+  todos os direitos ficam com o autor.
 
-Nenhum asset da Capcom está neste repositório ou nas releases; o mod lê o que
-precisa da sua própria instalação enquanto roda. Não toca no DRM da Steam nem
-em verificações de posse, e exige uma cópia legítima. Resident Evil 0 é marca
-registrada da Capcom; este projeto não é afiliado à Capcom.
+As releases não contêm nenhum arquivo do jogo. O mod lê o que precisa da sua
+própria instalação. Não mexe no DRM da Steam e precisa de uma cópia
+legítima. Resident Evil é marca da Capcom e este projeto não tem ligação com
+a Capcom.
 
-Código-fonte: licença MIT, veja [LICENSE](LICENSE).
+Código sob a [licença MIT](LICENSE).
