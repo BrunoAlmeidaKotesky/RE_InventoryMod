@@ -468,16 +468,31 @@ pub fn snapshot() -> Vec<(usize, usize, Vec<Item>)> {
             // where the window happens to be: the two drift apart whenever
             // the window moved after the last accessor call.
             //
-            // Safety: the entry's owner is the object the game handed out
-            // this bag from, and it is read exactly as `view_for` reads it.
-            let saved = unsafe { read((entry.owner + entry.offset) as *const Bag) };
+            // Read through the guarded path: an entry can outlive its owner
+            // if the game freed the object without a load in between, and a
+            // raw read of freed memory is a fault this mod must not cause.
+            // With nothing readable there, the window position stands.
             let items = entry.window.store().as_slice().to_vec();
-            let position = matching_position(&items, entry.window.position(), &saved.items)
+            let position = read_bag_guarded(entry.owner + entry.offset)
+                .and_then(|saved| {
+                    matching_position(&items, entry.window.position(), &saved.items)
+                })
                 .unwrap_or(entry.window.position());
 
             (entry.offset, position, items)
         })
         .collect()
+}
+
+/// A copy of the bag at `at`, or `None` if that memory is not readable.
+fn read_bag_guarded(at: usize) -> Option<Bag> {
+    let mut bytes = [0u8; std::mem::size_of::<Bag>()];
+    if !crate::debug::memory::read(at, &mut bytes) {
+        return None;
+    }
+    // Safety: `Bag` is `repr(C)` of plain integers, so any 64 bytes are a
+    // valid value, and the copy is aligned by being read into a local.
+    Some(unsafe { std::ptr::read_unaligned(bytes.as_ptr() as *const Bag) })
 }
 
 /// Where in `items` the six `saved` slots sit, if anywhere.

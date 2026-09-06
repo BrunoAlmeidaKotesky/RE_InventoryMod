@@ -17,6 +17,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use crate::core::logging::{log_debug, log_info};
+use crate::game::inventory::BAG_SIZE;
 
 /// Draws logged before going quiet. Enough to tell "once per open" from "once
 /// per frame" without filling the file.
@@ -100,10 +101,11 @@ fn take_request() -> bool {
 /// drawing path will want: it asks for the bags, which comes straight back
 /// through this mod.
 pub unsafe fn redraw_if_requested() {
-    // A screen that is not up has no panel to rebuild, and its object may
-    // already be freed — which is what a redraw against a stale pointer would
-    // find. Checked before the request is taken so it stays pending.
-    if !is_open() {
+    // Only while the screen is up and interactive. Its object may be freed
+    // once it is gone, and while it opens or leaves its widgets may not exist
+    // yet: a redraw then is the same null write either way. Checked before
+    // the request is taken so it stays pending.
+    if !screen_holds_the_window() {
         return;
     }
 
@@ -345,7 +347,10 @@ pub unsafe fn restore_partner_half() {
         return;
     };
 
-    let Some(menu) = menu() else { return };
+    // Through `phase`, not `menu`: this may run from the input thread after
+    // the screen closed, and the object must still read as a live menu
+    // before anything is written into it.
+    let Some(menu) = live_menu() else { return };
 
     ((menu + OFFSET_EXCHANGE) as *mut u8).write_volatile(original);
     log_debug!("Exchange state put back to {original}.");
@@ -353,6 +358,15 @@ pub unsafe fn restore_partner_half() {
 
 /// Highest phase the state machine dispatches (`cmp eax, 0xB` at `0x005E1E94`).
 const PHASE_LAST: i32 = 0xB;
+
+/// The menu object, only if it still reads as a live menu right now.
+///
+/// For writers on the input thread: the pointer alone is not enough, since
+/// the object can be freed between one poll and the next.
+fn live_menu() -> Option<usize> {
+    phase()?;
+    menu()
+}
 
 /// Drops the remembered menu object.
 ///
@@ -374,9 +388,18 @@ pub fn forget_menu() {
 /// the pointer is dropped on the spot rather than trusted once more.
 pub fn phase() -> Option<i32> {
     let menu = menu()?;
-    let phase = crate::debug::memory::read_i32(menu + OFFSET_PHASE)?;
+    let read = |offset: usize| crate::debug::memory::read_i32(menu + offset);
 
-    if !(0..=PHASE_LAST).contains(&phase) {
+    let phase = read(OFFSET_PHASE)?;
+
+    // Three fields the state machine keeps in narrow ranges. Freed memory
+    // reused by something else rarely satisfies all of them at once.
+    let slots = 0..BAG_SIZE as i32;
+    let live = (0..=PHASE_LAST).contains(&phase)
+        && read(OFFSET_CURSOR).is_some_and(|cursor| slots.contains(&cursor))
+        && read(OFFSET_PARTNER_CURSOR).is_some_and(|cursor| slots.contains(&cursor));
+
+    if !live {
         log_info!("Menu at 0x{menu:08X} reads phase {phase}; it is gone, forgetting it.");
         MENU.store(0, Ordering::Relaxed);
         return None;
@@ -511,7 +534,7 @@ pub unsafe fn save_confirmed_slot(menu: usize, slot: i32, pulled: bool) {
 /// # Safety
 /// The inventory screen must be up, so the menu object is alive.
 pub unsafe fn pull_cursor_left() {
-    let Some(menu) = menu() else { return };
+    let Some(menu) = live_menu() else { return };
 
     let cursor = (menu + OFFSET_CURSOR) as *mut i32;
     let value = cursor.read_volatile();
@@ -528,7 +551,7 @@ pub unsafe fn pull_cursor_left() {
 /// # Safety
 /// As `pull_cursor_left`.
 pub unsafe fn pull_second_cursor_left() {
-    let Some(menu) = menu() else { return };
+    let Some(menu) = live_menu() else { return };
 
     let cursor = (menu + OFFSET_SECOND_CURSOR) as *mut i32;
     let value = cursor.read_volatile();
@@ -545,7 +568,7 @@ pub unsafe fn pull_second_cursor_left() {
 /// # Safety
 /// As `pull_cursor_left`.
 pub unsafe fn pull_partner_cursor_left() {
-    let Some(menu) = menu() else { return };
+    let Some(menu) = live_menu() else { return };
 
     let cursor = (menu + OFFSET_PARTNER_CURSOR) as *mut i32;
     let value = cursor.read_volatile();
