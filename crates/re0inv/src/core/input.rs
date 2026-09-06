@@ -230,6 +230,9 @@ enum Target {
     Bags,
     /// The item box, standing in for the partner's bag.
     Box,
+    /// The partner's own bag alone, at this offset: the target of an
+    /// exchange, while the played half holds the item being given.
+    Partner(usize),
 }
 
 /// Where a scroll goes at this moment, if anywhere.
@@ -256,6 +259,10 @@ enum Target {
 fn scroll_target() -> Option<Target> {
     match panel::phase()? {
         panel::PHASE_PARTNER_HALF if crate::feature::item_box::is_open() => Some(Target::Box),
+        // An exchange aimed at the partner: only the partner's bag slides.
+        // The played half holds the item being given by its slot number, so
+        // it must stay exactly where it is.
+        panel::PHASE_PARTNER_HALF => crate::hook::accessor::partner_offset().map(Target::Partner),
         panel::PHASE_BROWSING => Some(Target::Bags),
         // Choosing the second item of a Combine: allowed once the first
         // item's row is held still, which is what keeps `+0x2B4` true.
@@ -272,7 +279,7 @@ fn active_selection() -> Option<(Target, i32)> {
     let target = scroll_target()?;
     let cursor = match target {
         Target::Bags => played_cursor()?,
-        Target::Box => panel::partner_cursor()?,
+        Target::Box | Target::Partner(_) => panel::partner_cursor()?,
     };
     Some((target, cursor))
 }
@@ -333,6 +340,10 @@ fn settle_cursor(target: Target) {
             crate::feature::item_box::item_in_view(cursor)
                 .is_some_and(|item| item.id == SLOT_TWO_FILLER)
         }
+        Target::Partner(offset) => {
+            let Some(cursor) = slot(panel::partner_cursor()) else { return };
+            registry::item_in_view(offset, cursor).is_some_and(|item| item.id == SLOT_TWO_FILLER)
+        }
     };
 
     if !on_tail {
@@ -346,7 +357,7 @@ fn settle_cursor(target: Target) {
         match target {
             Target::Bags if second => panel::pull_second_cursor_left(),
             Target::Bags => panel::pull_cursor_left(),
-            Target::Box => panel::pull_partner_cursor_left(),
+            Target::Box | Target::Partner(_) => panel::pull_partner_cursor_left(),
         }
     }
 }
@@ -355,6 +366,7 @@ fn scroll_by(target: Target, rows: i32) -> bool {
     match target {
         Target::Bags => registry::scroll_all(rows) > 0,
         Target::Box => crate::feature::item_box::scroll(rows),
+        Target::Partner(offset) => registry::scroll_offset(offset, rows),
     }
 }
 
@@ -363,6 +375,7 @@ fn rewind(target: Target) -> bool {
     match target {
         Target::Bags => registry::rewind_all() > 0,
         Target::Box => crate::feature::item_box::scroll(i32::MIN / 2),
+        Target::Partner(offset) => registry::scroll_offset(offset, i32::MIN / 2),
     }
 }
 
@@ -381,7 +394,7 @@ fn try_edge_scroll(cursor: Option<i32>) {
     let Some(target) = scroll_target() else { return };
 
     let cursor = match target {
-        Target::Box => panel::partner_cursor(),
+        Target::Box | Target::Partner(_) => panel::partner_cursor(),
         Target::Bags if panel::phase() == Some(panel::PHASE_SECOND_ITEM) => {
             panel::second_cursor()
         }

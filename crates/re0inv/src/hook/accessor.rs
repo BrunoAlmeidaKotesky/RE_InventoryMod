@@ -324,6 +324,17 @@ pub fn played_offset() -> Option<usize> {
     offset_for_id(played_id()?)
 }
 
+/// The bag offset of the character not being played: the other of the two.
+pub fn partner_offset() -> Option<usize> {
+    played_offset().map(|played| {
+        if played == FIRST_BAG_OFFSET {
+            SECOND_BAG_OFFSET
+        } else {
+            FIRST_BAG_OFFSET
+        }
+    })
+}
+
 /// The global holding the inventory manager, from the address table.
 pub fn inventory_holder() -> Option<usize> {
     let holder = addresses()?.inventory_holder;

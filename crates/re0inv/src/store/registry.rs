@@ -389,6 +389,14 @@ fn with_offset(offset: usize, mut action: impl FnMut(&mut Window)) -> bool {
     found
 }
 
+/// Scrolls only the store at bag offset `offset` by `rows`; wraps to the
+/// first slot for a large negative `rows`. Reports whether it moved.
+pub fn scroll_offset(offset: usize, rows: i32) -> bool {
+    let mut moved = false;
+    with_offset(offset, |window| moved |= window.scroll_rows(rows));
+    moved
+}
+
 /// Holds the visible row `visible_row` of the bag at `offset` in place.
 pub fn pin_row(offset: usize, visible_row: usize) -> bool {
     with_offset(offset, |window| window.pin_row(visible_row))
