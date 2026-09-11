@@ -113,9 +113,12 @@ pub fn build_one(dir: &Path, language: &str) -> Result<String, String> {
     match typewriter::without_ribbon(&current, language) {
         Some(patched) => {
             file.set(typewriter::WITHOUT_RIBBON, &patched)?;
-            changed.push("without one");
+            changed.push(if typewriter::translated(language) {
+                "without one"
+            } else {
+                "without one, in English"
+            });
         }
-        None if !typewriter::translated(language) => changed.push("not translated"),
         None => changed.push("already offers a choice"),
     }
 
@@ -143,7 +146,7 @@ pub fn build_missing(dir: &Path) -> Result<Vec<(String, String)>, String> {
     let missing: Vec<&str> = LANGUAGES
         .iter()
         .filter(|language| original(dir, language).exists())
-        .filter(|language| !patched_path(dir, language).exists())
+        .filter(|language| !current(dir, language))
         .copied()
         .collect();
 
@@ -162,4 +165,33 @@ pub fn build_missing(dir: &Path) -> Result<Vec<(String, String)>, String> {
     }
 
     Ok(written)
+}
+
+/// Whether the patched archive is there and is one this version would write.
+///
+/// Earlier versions wrote every language's archive but only gave English a
+/// prompt without a ribbon. Those files sit under the same name, so presence
+/// alone would keep them forever; a second message that still does not ask is
+/// what tells one apart, and it is rebuilt like a missing one.
+fn current(dir: &Path, language: &str) -> bool {
+    let path = patched_path(dir, language);
+    if !path.exists() {
+        return false;
+    }
+
+    let Ok(mut archive) = open(&path) else {
+        return false;
+    };
+
+    let name = format!("message\\message_commonmsg_{language}");
+    let Some(entry) = archive.find(&name) else {
+        return false;
+    };
+
+    let Ok(file) = gmd::Gmd::read(&entry.data) else {
+        return false;
+    };
+
+    file.get(typewriter::WITHOUT_RIBBON)
+        .is_some_and(|message| typewriter::asks(&message))
 }
