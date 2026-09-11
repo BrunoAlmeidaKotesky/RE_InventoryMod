@@ -141,6 +141,18 @@ pub struct Addresses {
     /// Where the `je` went: the write that puts the menu back in phase six.
     pub partner_half_kick: usize,
 
+    /// `call <room getter>` in the exchange handler, with the partner
+    /// character in `ecx`. Five bytes. Starts the check that keeps items 102
+    /// and 127 apart in room 164, and it reads the partner without testing
+    /// for null: `0x005DC9C0` answers zero while no partner is in the party,
+    /// and the screen's own open path tests that, but this does not.
+    pub exchange_partner_check: usize,
+    /// `mov eax, [ecx+0xFF4]; ret` - what that call goes to.
+    pub exchange_partner_room: usize,
+    /// The first instruction past the whole check, where both item ids are
+    /// still in `ebx` and `esi` and nothing is pending on the stack.
+    pub exchange_partner_skip: usize,
+
     // --- Saving and loading ---
 
     /// `imul edi, 0x1C850` where the game works out which slot it is saving to.
@@ -227,6 +239,9 @@ const JAN_2025: Addresses = Addresses {
     partner_half_valid: 0x005E_3B9E,
     partner_half_continue: 0x005E_3BA8,
     partner_half_kick: 0x005E_50F7,
+    exchange_partner_check: 0x005E_40E3,
+    exchange_partner_room: 0x0052_6490,
+    exchange_partner_skip: 0x005E_41AD,
 
     save_slot: 0x0061_36D9,
     load_slot: 0x0061_27E1,

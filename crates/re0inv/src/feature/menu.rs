@@ -50,6 +50,9 @@ static CHANGE_CONTINUE: AtomicUsize = AtomicUsize::new(0);
 static CLOSE_CONTINUE: AtomicUsize = AtomicUsize::new(0);
 static VALID_CONTINUE: AtomicUsize = AtomicUsize::new(0);
 static VALID_KICK: AtomicUsize = AtomicUsize::new(0);
+static PARTNER_ROOM: AtomicUsize = AtomicUsize::new(0);
+static CHECK_CONTINUE: AtomicUsize = AtomicUsize::new(0);
+static CHECK_SKIP: AtomicUsize = AtomicUsize::new(0);
 
 /// The partner the box stood in for, so a character swap can be noticed.
 static BOX_PARTNER: AtomicUsize = AtomicUsize::new(0);
@@ -115,6 +118,8 @@ impl Menu {
             valid_stub as unsafe extern "C" fn() as usize,
         );
 
+        install_partner_check(addresses, &mut patches);
+
         log_info!("Inventory screen: {} patch(es) applied.", patches.len());
 
         Menu { patches }
@@ -163,7 +168,112 @@ unsafe fn install_animation(addresses: &Addresses, patches: &mut Vec<Patch>) {
     }
 }
 
+/// Redirects the call that starts the partner check inside an exchange.
+///
+/// # The crash this exists for
+///
+/// Confirming an exchange runs a check that keeps two particular items apart
+/// in one particular room. It asks each character which room it is in, and
+/// it asks the partner without testing whether there is one:
+///
+/// ```asm
+/// 0x005E4035  call 0x005DC9C0        ; the partner, or zero without one
+/// ...
+/// 0x005E40DF  mov ecx, [esp+0x1C]    ; that answer
+/// 0x005E40E3  call 0x00526490        ; mov eax, [ecx+0xFF4]
+/// ```
+///
+/// The game never gets here without a partner, because the partner's half of
+/// the screen is not shown then. The box puts that half on screen anyway, so
+/// the first deposit at the train's typewriter, with Rebecca still alone,
+/// read address `0xFF4` and closed the game.
+///
+/// While the box is the thing in that half the check has nothing to say,
+/// since it is about the partner. It is skipped outright, which is also what
+/// the reference mod does. Skipped too when the partner is null, whatever is
+/// showing: that is the game's own missing test, put back.
+unsafe fn install_partner_check(addresses: &Addresses, patches: &mut Vec<Patch>) {
+    let Some(target) = crate::hook::detour::call_target(addresses.exchange_partner_check) else {
+        log_warn!("The exchange handler does not start its partner check with a call where expected.");
+        return;
+    };
+
+    if target != addresses.exchange_partner_room {
+        log_warn!(
+            "The partner check calls 0x{target:08X}, not the room getter we know about; \
+             exchanges without a partner will crash."
+        );
+        return;
+    }
+
+    PARTNER_ROOM.store(target, Ordering::Relaxed);
+    CHECK_CONTINUE.store(addresses.exchange_partner_check + 5, Ordering::Relaxed);
+    CHECK_SKIP.store(addresses.exchange_partner_skip, Ordering::Relaxed);
+
+    let expected = crate::hook::detour::call_bytes(addresses.exchange_partner_check, target);
+
+    crate::hook::detour::jump_over(
+        patches,
+        "the partner check in an exchange",
+        addresses.exchange_partner_check,
+        &expected,
+        partner_check_stub as unsafe extern "C" fn() as usize,
+    );
+}
+
 // --- The trampolines ---
+
+/// Stands in for the call that begins the partner check.
+///
+/// # Safety
+/// Reached only through the jump written over that call, so `ecx` holds the
+/// partner character the check was about to read, or zero. Both item ids the
+/// code after the check needs are in `ebx` and `esi`, which nothing here
+/// touches. When the check runs, the call it replaced is made from here and
+/// control rejoins the instruction after it.
+#[unsafe(naked)]
+unsafe extern "C" fn partner_check_stub() {
+    core::arch::naked_asm!(
+        "pushad",
+        "mov ebp, esp",
+        "and esp, -16",
+        "sub esp, 16",
+        "mov [esp], ecx",
+        "call {decide}",
+        "mov esp, ebp",
+        "test eax, eax",
+        "popad",
+        "jnz 2f",
+        "call dword ptr [{room}]",
+        "jmp dword ptr [{continue_at}]",
+        "2:",
+        "jmp dword ptr [{skip}]",
+        decide = sym skip_partner_check,
+        room = sym PARTNER_ROOM,
+        continue_at = sym CHECK_CONTINUE,
+        skip = sym CHECK_SKIP,
+    )
+}
+
+/// Whether the partner check should be skipped: no partner, or the box.
+extern "C" fn skip_partner_check(partner: usize) -> i32 {
+    let result = std::panic::catch_unwind(|| {
+        if partner == 0 {
+            log_info!("Exchange with no partner in the party; the partner check is skipped.");
+            return 1;
+        }
+
+        if crate::feature::item_box::is_open() {
+            return 1;
+        }
+
+        0
+    });
+
+    // On a panic the check runs as the game wrote it, which is right whenever
+    // the partner is there, and the game's own behaviour when it is not.
+    result.unwrap_or(0)
+}
 
 /// Chooses which opening animation runs.
 ///
