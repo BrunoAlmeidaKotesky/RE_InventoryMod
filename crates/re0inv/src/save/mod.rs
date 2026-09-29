@@ -40,7 +40,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use crate::core::logging::{log_info, log_warn};
+use crate::core::logging::{log_debug, log_info, log_warn};
 use crate::game::addresses::Addresses;
 use crate::game::inventory::Item;
 use crate::hook::patch::Patch;
@@ -64,6 +64,58 @@ static NEW_GAME: AtomicUsize = AtomicUsize::new(0);
 
 /// Where the side file lives, decided once at startup.
 static PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+// --- Telling the player's save from the game's own housekeeping ---
+//
+// The two hooked routines are per-slot copies, and the game has bulk uses for
+// both: reading its save file imports slot 0, then 1, and so on to 19, and
+// creating a fresh file writes all twenty the same way. Twenty calls,
+// milliseconds apart, that are not the player loading or saving anything.
+// Seen in a live log as twenty "Loading slot" lines at startup.
+//
+// A load in that run is harmless — nothing is registered yet — but forty log
+// lines bury the one load that matters. A save in that run is not harmless:
+// each call would stamp the live inventory into that slot's record. So a call
+// that continues a run is recognised by its shape, consecutive slot and short
+// gap, and treated as housekeeping: logged quietly, and for saving, skipped.
+
+/// A call for the slot after the last one, this soon after it, is the same run.
+const RUN_GAP: Duration = Duration::from_secs(2);
+
+struct Run {
+    last_slot: u32,
+    at: Instant,
+    length: u32,
+}
+
+static LOAD_RUN: Mutex<Option<Run>> = Mutex::new(None);
+static SAVE_RUN: Mutex<Option<Run>> = Mutex::new(None);
+
+/// Records this call and says whether it continues a consecutive run, and how
+/// long that run is now.
+fn note_call(run: &Mutex<Option<Run>>, slot: u32) -> (bool, u32) {
+    let Ok(mut run) = run.lock() else {
+        return (false, 1);
+    };
+
+    let now = Instant::now();
+    let length = match run.as_ref() {
+        Some(previous)
+            if slot == previous.last_slot + 1 && now.duration_since(previous.at) < RUN_GAP =>
+        {
+            previous.length + 1
+        }
+        _ => 1,
+    };
+
+    *run = Some(Run {
+        last_slot: slot,
+        at: now,
+        length,
+    });
+
+    (length > 1, length)
+}
 
 pub struct Persistence {
     patches: Vec<Patch>,
@@ -127,6 +179,7 @@ impl Persistence {
         install_new_game(addresses, &mut patches, code);
 
         log_info!("Persistence: {} patch(es) applied, file {}.", patches.len(), path.display());
+        describe_file(&path);
 
         if let Ok(mut installed) = INSTALLED.lock() {
             *installed = Some(Persistence { patches });
@@ -233,10 +286,59 @@ unsafe extern "C" fn new_game_stub() {
     )
 }
 
+/// Says once, at startup, what the side file looks like and whether the game
+/// folder can be written to at all. The one question every "my items vanished"
+/// report needs answered first.
+fn describe_file(path: &std::path::Path) {
+    let probe = path.with_extension("probe");
+    match std::fs::write(&probe, b"re0inv") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&probe);
+        }
+        Err(e) => {
+            log_warn!(
+                "Cannot write beside the game ({e}). Nothing put in the extra slots or the \
+                 box will survive a reload until the folder is writable: {}",
+                path.display()
+            );
+            return;
+        }
+    }
+
+    match std::fs::metadata(path) {
+        Ok(meta) => {
+            let file = read_file();
+            let slots: Vec<String> = file.slots.iter().map(|s| s.slot.to_string()).collect();
+            log_info!(
+                "Side file present, {} bytes, records for slot(s) [{}].",
+                meta.len(),
+                slots.join(", ")
+            );
+        }
+        Err(_) => log_info!("No side file yet; the first save creates it."),
+    }
+}
+
 extern "C" fn on_save(slot: u32) {
     let _ = std::panic::catch_unwind(|| {
         if slot >= SAVE_SLOTS {
             log_warn!("Save slot {slot} is outside the twenty the game has; not recording.");
+            return;
+        }
+
+        // Twenty consecutive saves are the game writing a fresh file, not the
+        // player. Recording those would stamp the live inventory into every
+        // slot's record.
+        let (housekeeping, length) = note_call(&SAVE_RUN, slot);
+        if housekeeping {
+            if length == SAVE_SLOTS {
+                log_info!(
+                    "The game wrote all twenty slots in one go (a new save file); \
+                     the mod's records were left alone."
+                );
+            } else {
+                log_debug!("Save of slot {slot} continues a run of {length}; not recording.");
+            }
             return;
         }
 
@@ -286,9 +388,33 @@ extern "C" fn on_save(slot: u32) {
             data.stores.len()
         );
 
+        for store in &data.stores {
+            log_info!(
+                "  bag +0x{:02X}: the saved six at slot {}, items [{}].",
+                store.offset,
+                store.position + 1,
+                ids(&store.items)
+            );
+        }
+
         current.put(data);
         write_file(&current);
     });
+}
+
+/// Item ids as the log shows them, empties as dots.
+fn ids(items: &[Item]) -> String {
+    items
+        .iter()
+        .map(|item| {
+            if item.is_empty() {
+                ".".to_string()
+            } else {
+                item.id.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 extern "C" fn on_load(slot: u32) {
@@ -317,18 +443,51 @@ extern "C" fn on_load(slot: u32) {
             return;
         }
 
+        // The game importing its save file calls this for every slot in turn.
+        // Nothing is registered at that point, so the wipe above costs
+        // nothing, and the staging below is replaced on the next call; only
+        // the log needs telling apart from a real load.
+        let (housekeeping, length) = note_call(&LOAD_RUN, slot);
+
         let mut file = read_file();
 
+        if housekeeping {
+            if length == SAVE_SLOTS {
+                let recorded: Vec<String> =
+                    file.slots.iter().map(|s| s.slot.to_string()).collect();
+                log_info!(
+                    "The game read all twenty slots in one go (its save file); \
+                     the mod has records for slot(s) [{}].",
+                    recorded.join(", ")
+                );
+            } else {
+                log_debug!("Load of slot {slot} continues a run of {length}.");
+            }
+        }
+
         let Some(data) = file.take(slot as u8) else {
-            log_info!("Slot {slot} has nothing recorded beside it; loading as the game saved it.");
+            if !housekeeping {
+                log_info!("Slot {slot} has nothing recorded beside it; loading as the game saved it.");
+            }
             return;
         };
 
-        log_info!(
-            "Loading slot {slot}: {} in the box, {} bag(s) to widen.",
-            occupied(&data.box_items),
-            data.stores.len()
-        );
+        if !housekeeping {
+            log_info!(
+                "Loading slot {slot}: {} in the box, {} bag(s) to widen.",
+                occupied(&data.box_items),
+                data.stores.len()
+            );
+
+            for store in &data.stores {
+                log_info!(
+                    "  bag +0x{:02X}: the saved six recorded at slot {}, items [{}].",
+                    store.offset,
+                    store.position + 1,
+                    ids(&store.items)
+                );
+            }
+        }
 
         let restores: Vec<Restore> = data
             .stores
@@ -484,4 +643,46 @@ fn path() -> Option<PathBuf> {
 /// Items actually present in a record, ignoring the empty padding.
 fn occupied(items: &[Item]) -> usize {
     items.iter().filter(|item| !item.is_empty()).count()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn consecutive_slots_form_a_run_and_anything_else_starts_over() {
+        let run = Mutex::new(None);
+
+        assert_eq!(note_call(&run, 0), (false, 1));
+        assert_eq!(note_call(&run, 1), (true, 2));
+        assert_eq!(note_call(&run, 2), (true, 3));
+
+        // The player picking slot 7 after the sweep reached 2.
+        assert_eq!(note_call(&run, 7), (false, 1));
+        // Saving the same slot twice is two saves, not a run.
+        assert_eq!(note_call(&run, 7), (false, 1));
+        // Going backwards is not a run either.
+        assert_eq!(note_call(&run, 6), (false, 1));
+    }
+
+    #[test]
+    fn a_full_sweep_is_recognised_at_its_last_slot() {
+        let run = Mutex::new(None);
+        let mut last = (false, 0);
+        for slot in 0..SAVE_SLOTS {
+            last = note_call(&run, slot);
+        }
+        assert_eq!(last, (true, SAVE_SLOTS));
+    }
+
+    #[test]
+    fn a_stale_run_does_not_continue() {
+        let run = Mutex::new(Some(Run {
+            last_slot: 4,
+            at: Instant::now() - RUN_GAP - Duration::from_millis(1),
+            length: 5,
+        }));
+
+        assert_eq!(note_call(&run, 5), (false, 1));
+    }
 }

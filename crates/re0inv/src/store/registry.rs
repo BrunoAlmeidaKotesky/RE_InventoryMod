@@ -316,7 +316,13 @@ pub fn forget_all() {
     if let Ok(mut registry) = REGISTRY.lock() {
         let count = registry.entries.len();
         registry.entries.clear();
-        log_info!("Dropped {count} store(s).");
+        if count == 0 {
+            // The game importing its save file reaches here twenty times
+            // with nothing registered; that is not worth twenty lines.
+            log_debug!("Dropped 0 store(s).");
+        } else {
+            log_info!("Dropped {count} store(s).");
+        }
     }
 }
 
@@ -673,22 +679,40 @@ fn apply_staged(entry: &mut Entry, restored: &Bag, bag_changed: bool) -> bool {
         let Some(position) =
             matching_position(&restore.items, restore.position, &restored.items)
         else {
+            // Offered only when the bag is new or the game wrote it, so this
+            // is a handful of lines per load, and the one that explains a
+            // restore that never happened: what the game loaded against what
+            // the file remembered.
+            let show = |items: &[Item]| -> String {
+                items
+                    .iter()
+                    .map(|item| if item.is_empty() { ".".to_string() } else { item.id.to_string() })
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
+            log_info!(
+                "Record for bag +0x{:02X} does not match yet: the game's six are [{}], \
+                 the record holds [{}] with the saved six recorded at slot {}.",
+                restore.offset,
+                show(&restored.items),
+                show(&restore.items),
+                restore.position + 1
+            );
             continue;
         };
 
         let configured = entry.window.store().capacity();
 
-        if restore.items.len() > configured {
+        entry.window = Window::with_items(configured, &restore.items, position);
+
+        let rebuilt = entry.window.store().capacity();
+        if rebuilt > configured {
             log_warn!(
-                "The record for bag +0x{:02X} holds {} items but {} slots are configured; \
-                 keeping every item.",
-                restore.offset,
-                restore.items.len(),
-                configured
+                "The record for bag +0x{:02X} has items past slot {configured}; \
+                 keeping {rebuilt} slots so none is lost.",
+                restore.offset
             );
         }
-
-        entry.window = Window::with_items(configured, &restore.items, position);
 
         if !staged.applied {
             staged.applied = true;
