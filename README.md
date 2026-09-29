@@ -6,7 +6,9 @@ Three small mods for **Resident Evil 0 HD Remaster** on Steam. Install all
 of them or only the one you want.
 
 - **Inventory expansion**: 12 slots per character instead of 6. The panel
-  still shows 6 at a time, you scroll to see the rest.
+  still shows 6 at a time, you scroll to see the rest. The count is yours to
+  pick: `Slots=8` in `re0inv.ini`, any even number from 6 to 32 (an odd
+  number is rounded up).
 - **Item box**: every typewriter has an item box, like the other games in
   the series.
 - **Door skip**: removes the door animation between rooms.

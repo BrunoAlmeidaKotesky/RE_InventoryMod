@@ -441,17 +441,17 @@ pub fn set_contents(items: Vec<Item>) {
 
     let capacity = storage.window.store().capacity();
 
-    if items.len() > capacity {
-        log_warn!(
-            "The box's record holds {} items but {capacity} slots are configured; \
-             keeping every item.",
-            items.len()
-        );
-    }
-
     // Grows to fit rather than truncating: a shrunk configuration is not a
     // licence to delete what a previous session stored.
     storage.window = Window::with_items(capacity, &items, 0);
+
+    let rebuilt = storage.window.store().capacity();
+    if rebuilt > capacity {
+        log_warn!(
+            "The box's record has items past slot {capacity}; keeping {rebuilt} slots \
+             so none is lost."
+        );
+    }
 
     let mut bag = storage.read();
     storage.window.write_into(&mut bag);

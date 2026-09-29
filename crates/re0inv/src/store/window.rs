@@ -59,10 +59,30 @@ impl Window {
     /// items come from a file recording what the player owned; a configuration
     /// that shrank since then is not a licence to delete things, and a larger
     /// window is the only answer that keeps everything.
+    ///
+    /// What it fits is the items, not the record's length. A record is the
+    /// whole store, empties included, so measuring the length would make a
+    /// smaller `Slots` setting do nothing for every save made before it:
+    /// twelve slots with three herbs in them would come back as twelve
+    /// forever. Trailing empties are dropped; anything occupied is kept, and
+    /// so is the page the recorded position shows, because the six there are
+    /// what the game's own bag holds right now.
     pub fn with_items(capacity: usize, items: &[Item], position: usize) -> Window {
-        let mut window = Window::new(capacity.max(items.len()));
+        let occupied = items
+            .iter()
+            .rposition(|item| !item.is_empty())
+            .map_or(0, |last| last + 1);
 
-        for (index, item) in items.iter().enumerate() {
+        let shown = if items.len() > BAG_SIZE {
+            (position + BAG_SIZE).min(items.len())
+        } else {
+            0
+        };
+
+        let needed = occupied.max(shown).next_multiple_of(2);
+        let mut window = Window::new(capacity.max(needed));
+
+        for (index, item) in items.iter().enumerate().take(window.store.capacity()) {
             window.store.set(index, *item);
         }
 
@@ -486,6 +506,41 @@ mod tests {
             window.store_mut().set(i, item(HERB + i as i32));
         }
         window
+    }
+
+    /// A record is the whole store, empties included. Measuring its length
+    /// would make a smaller setting do nothing for every earlier save.
+    #[test]
+    fn a_restored_record_shrinks_to_the_configured_size_when_its_items_fit() {
+        let mut record = vec![Item::EMPTY; 12];
+        record[0] = item(HERB);
+        record[3] = item(HERB + 1);
+
+        let window = Window::with_items(8, &record, 0);
+
+        assert_eq!(window.store().capacity(), 8);
+        assert_eq!(window.store().get(0), Some(item(HERB)));
+        assert_eq!(window.store().get(3), Some(item(HERB + 1)));
+    }
+
+    #[test]
+    fn a_restored_record_keeps_every_occupied_slot_and_its_recorded_page() {
+        let mut record = vec![Item::EMPTY; 12];
+        record[10] = item(HERB);
+
+        let occupied = Window::with_items(8, &record, 0);
+        assert_eq!(occupied.store().capacity(), 12);
+        assert_eq!(occupied.store().get(10), Some(item(HERB)));
+
+        // Nothing past slot 8, but the game's bag holds the six at 6..12.
+        let empty = vec![Item::EMPTY; 12];
+        let paged = Window::with_items(8, &empty, 6);
+        assert_eq!(paged.store().capacity(), 12);
+        assert_eq!(paged.position(), 6);
+
+        // A larger setting than the record simply grows.
+        let grown = Window::with_items(12, &record[..8], 0);
+        assert_eq!(grown.store().capacity(), 12);
     }
 
     #[test]

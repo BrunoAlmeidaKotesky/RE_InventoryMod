@@ -19,6 +19,11 @@ pub const DEFAULT_BOX_SLOTS: usize = 24;
 /// absurd allocation.
 pub const MAX_SLOTS: usize = 32;
 
+/// Upper bound on the box. Looser than the inventory's, since the box is
+/// never scrolled by the game's own code; still bounded, because every
+/// out-of-view search sweeps the box one page at a time.
+pub const MAX_BOX_SLOTS: usize = 256;
+
 #[derive(Clone)]
 pub struct Config {
     pub enabled: bool,
@@ -30,6 +35,10 @@ pub struct Config {
     pub doors: DoorsConfig,
     pub item_box: ItemBoxConfig,
     pub debug: DebugConfig,
+    /// Numeric settings whose value did not parse, kept for `sanitize` to
+    /// report. Silently keeping the default is how a player who typed
+    /// `Slots=8 slots` came to ask why nothing changed.
+    unreadable: Vec<String>,
 }
 
 /// Storage shown in place of the partner's bag.
@@ -86,6 +95,7 @@ impl Default for Config {
                 hang_dump: true,
                 probe_value: 0,
             },
+            unreadable: Vec::new(),
         }
     }
 }
@@ -106,8 +116,9 @@ impl Config {
             cfg.enabled = parse_bool(v, cfg.enabled);
         }
         if let Some(v) = get("slots") {
-            if let Ok(n) = v.parse::<usize>() {
-                cfg.slots = n;
+            match v.parse::<usize>() {
+                Ok(n) => cfg.slots = n,
+                Err(_) => cfg.unreadable.push(format!("Slots={v}")),
             }
         }
         if let Some(v) = get("level") {
@@ -122,8 +133,9 @@ impl Config {
             cfg.item_box.enabled = parse_bool(v, cfg.item_box.enabled);
         }
         if let Some(v) = get("boxslots") {
-            if let Ok(n) = v.parse::<usize>() {
-                cfg.item_box.slots = n;
+            match v.parse::<usize>() {
+                Ok(n) => cfg.item_box.slots = n,
+                Err(_) => cfg.unreadable.push(format!("BoxSlots={v}")),
             }
         }
         if let Some(v) = get("skipdoors") {
@@ -158,6 +170,10 @@ impl Config {
     pub fn sanitize(&mut self) -> Vec<String> {
         let mut warnings = Vec::new();
 
+        for setting in self.unreadable.drain(..) {
+            warnings.push(format!("{setting} is not a whole number; using the default."));
+        }
+
         if self.slots < BAG_SIZE {
             warnings.push(format!(
                 "Slots={} is below the stock {}; using {}.",
@@ -181,6 +197,35 @@ impl Config {
                 self.slots, MAX_SLOTS
             ));
             self.slots = MAX_SLOTS;
+        }
+
+        // The same three rules for the box. The store would force the first
+        // two on its own, but silently: the player who wrote BoxSlots=25 and
+        // sees 26 deserves to be told why.
+        let box_slots = self.item_box.slots;
+
+        if box_slots < BAG_SIZE {
+            warnings.push(format!(
+                "BoxSlots={box_slots} is below the minimum {BAG_SIZE}; using {BAG_SIZE}."
+            ));
+            self.item_box.slots = BAG_SIZE;
+        }
+
+        if !self.item_box.slots.is_multiple_of(2) {
+            let fixed = self.item_box.slots + 1;
+            warnings.push(format!(
+                "BoxSlots={} is odd and would break two-slot items; using {fixed}.",
+                self.item_box.slots
+            ));
+            self.item_box.slots = fixed;
+        }
+
+        if self.item_box.slots > MAX_BOX_SLOTS {
+            warnings.push(format!(
+                "BoxSlots={} exceeds the supported maximum; using {MAX_BOX_SLOTS}.",
+                self.item_box.slots
+            ));
+            self.item_box.slots = MAX_BOX_SLOTS;
         }
 
         warnings

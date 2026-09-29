@@ -6,7 +6,9 @@ Três mods pequenos para **Resident Evil 0 HD Remaster** na Steam. Instale
 os três ou só o que você quiser.
 
 - **Inventário expandido**: 12 slots por personagem em vez de 6. O painel
-  continua mostrando 6 de cada vez, você rola para ver o resto.
+  continua mostrando 6 de cada vez, você rola para ver o resto. A quantidade
+  é você quem escolhe: `Slots=8` no `re0inv.ini`, qualquer número par de 6 a
+  32 (ímpar é arredondado para cima).
 - **Baú de itens**: toda máquina de escrever tem um baú, como nos outros
   jogos da série.
 - **Portas instantâneas**: tira a animação de porta entre as salas.
